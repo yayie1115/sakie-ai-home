@@ -1,5 +1,7 @@
 # sakie-ai-home
 
+Private AI companion system
+
 长期维护的个人 AI 系统基础工程。前端 React + TypeScript + Vite + React Router，后端 Node.js + TypeScript + Express。使用 npm workspaces 统一安装依赖，前后端独立构建、独立运行。已实现 SQLite 基础数据层和 Memory、Diary、Dream、Activity 的创建、查询、删除 API。未接入 AI，前端仍仅包含基础导航及占位页面。详细模型、API 请求格式和备份说明见 [基础数据层](docs/data-layer.md)。
 
 ## 目录
