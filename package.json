@@ -1,1 +1,23 @@
-{"name":"sakie-ai-home","version":"0.1.0","private":true,"workspaces":["frontend","backend"],"engines":{"node":">=24 <25"},"scripts":{"dev":"concurrently -k -n backend,frontend \"npm run dev -w backend\" \"npm run dev -w frontend\"","build":"npm run build --workspaces","typecheck":"npm run typecheck --workspaces","test":"npm run test -w backend"},"devDependencies":{"concurrently":"^9.2.1"}}
+{
+  "name": "sakie-ai-home",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend",
+    "packages/contracts",
+    "local-agent"
+  ],
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n backend,frontend \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test -w backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

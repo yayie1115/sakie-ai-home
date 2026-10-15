@@ -46,6 +46,8 @@ sakie-ai-home/
 
 ## 本地运行
 
+第一阶段首次运行请先阅读 [身份、迁移与备份说明](docs/phase1-implementation.md)。原 API 现需登录；旧库先备份并导入外部运行副本，原库保留不动。由用户在本机执行一次 npm run auth:setup -w backend 配置访问密码。
+
 安装 Node.js 24.x 和 npm，在 `E:\sakie-ai-home` 项目根目录执行（保持开发终端运行才能访问网页）：
 
 ```bash
@@ -82,6 +84,8 @@ npm run build
 
 ## Linux VPS Docker 部署
 
+**第一阶段部署提示：以下是原始部署流程，不可直接用于本轮生产升级。新增认证要求显式 PUBLIC_ORIGIN=https://sakiehome.icu、外部备份路径和身份配置；原 v1 数据卷必须先备份与副本演练。当前没有修改线上配置。详见 docs/phase1-implementation.md。**
+
 准备 Docker Engine 和 Docker Compose v2，将整个项目（包含 package-lock.json）上传到 VPS。无需在 VPS 安装 Node.js。
 
 ```bash
@@ -116,4 +120,12 @@ docker compose down          # 停止服务
 
 ## E 盘开发和数据存储
 
-所有开发操作在 E:/sakie-ai-home 进行，依赖位于 node_modules，构建位于 frontend/dist 和 backend/dist，数据库默认位于 backend/data/sakie.db。本机 .npmrc 将 npm 缓存固定在 E:/sakie-ai-home/.npm-cache；该机器专用文件不提交也不放入 Docker 镜像，Linux CI 和 VPS 保持默认缓存配置。Docker 数据使用 sakie-data 持久卷。模型和 API 详情见 docs/data-layer.md。
+所有开发操作在 E:/sakie-ai-home 进行，依赖位于 node_modules，构建位于 frontend/dist 和 backend/dist，数据库默认位于项目外的 E:/sakie-ai-home-data/cloud/sakie.db。本机 .npmrc 将 npm 缓存固定在 E:/sakie-ai-home/.npm-cache；该机器专用文件不提交也不放入 Docker 镜像，Linux CI 和 VPS 保持默认缓存配置。Docker 数据使用 sakie-data 持久卷。模型和 API 详情见 docs/data-layer.md。
+
+## 第一阶段交付
+
+- [实施、测试、回退与已知限制](docs/phase1-implementation.md)
+- [同步协议基础（仅设计）](docs/sync-protocol-v1.md)
+- [架构审查基线](docs/architecture-review.md)
+
+当前没有接入真实模型或实现双端同步。

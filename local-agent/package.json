@@ -1,0 +1,1 @@
+{"name":"@sakie/local-agent","version":"0.1.0","private":true,"type":"module","scripts":{"build":"tsc","typecheck":"tsc --noEmit"},"dependencies":{"@sakie/contracts":"0.1.0"},"devDependencies":{"typescript":"^5.9.3"}}

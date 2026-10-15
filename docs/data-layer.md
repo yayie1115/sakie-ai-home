@@ -1,12 +1,15 @@
 # 基础数据层
 
+> 第一阶段更新：业务 API 需要用户会话，写请求需要 X-CSRF-Token；DELETE 改为隐藏，保留原始行。运行数据库默认在 E:/sakie-ai-home-data/cloud/sakie.db，旧路径原库保留。迁移、备份、恢复及登录操作以 [第一阶段说明](phase1-implementation.md) 为准。
+
+
 ## 数据库
 
 SQLite 单文件数据库，使用 Node.js 24 的内置 node:sqlite / DatabaseSync，不增加第三方数据库驱动，也不需要独立数据库服务。该接口在 Node.js 24 系列仍属实验性 API；当前项目固定 Node.js 24，未来升级时需重新验证。同步访问适用于当前个人系统的小规模数据，未来高并发时可替换仓储层。
 
-本地默认数据库路径：E:/sakie-ai-home/backend/data/sakie.db。路径由后端模块位置推导，开发与构建后的服务使用同一文件。首次启动自动创建目录和表；DATABASE_PATH 可覆盖路径。相对路径按启动工作目录解析，使用 npm workspace 命令时为 backend 目录。
+本地默认数据库路径：E:/sakie-ai-home-data/cloud/sakie.db。开发与构建后的服务使用同一外部路径。旧库不会静默原地升级，首次导入需要 db:prepare --import-legacy；DATABASE_PATH 可覆盖路径。相对路径按启动工作目录解析，使用 npm workspace 命令时为 backend 目录。
 
-SQLite 启用 WAL 和 5 秒 busy_timeout。迁移使用事务和 PRAGMA user_version 管理，当前版本为 1；数据库版本高于应用版本时拒绝启动。查询使用绑定参数，表名和列名来自内部定义。
+SQLite 启用 WAL 和 5 秒 busy_timeout。迁移使用事务和 PRAGMA user_version 管理，当前版本为 2；数据库版本高于应用版本时拒绝启动。查询使用绑定参数，表名和列名来自内部定义。
 
 Docker 数据库位于 /app/data/sakie.db，持久化到 Compose 命名卷 sakie-data。docker compose down 保留数据；不要使用 docker compose down -v，除非明确要删除数据。备份时先停止后端，再复制本地整个 backend/data 目录或备份 Docker 数据卷；WAL 模式下不要只复制运行中的主 db 文件。
 
@@ -62,7 +65,7 @@ source=ai 仅作为记录来源标记，可用于未来导入历史记录，当�
 {"time":"2026-10-14T20:00:00+08:00","type":"coding","content":"完成基础数据层。"}
 ~~~
 
-PowerShell 创建记忆示例：
+PowerShell 创建记忆示例（以下旧请求体格式保留；第一阶段调用时须先登录，并附带会话 Cookie 和 X-CSRF-Token，未认证直接请求将返回 401）：
 
 ~~~powershell
 $body = @{ content = '喜欢安静的工作环境'; type = 'preference'; importance = 4 } | ConvertTo-Json
@@ -75,6 +78,6 @@ Invoke-RestMethod -Method Delete -Uri ('http://localhost:5173/api/memories/' + $
 
 npm run typecheck、npm test、npm run build。测试覆盖四类记录的创建/分页/单条查询/删除、数据库关闭重开后的数据保留和删除持久化、SQL 特殊内容及错误参数。测试数据库在 E 盘 backend/test 下临时创建，结束后清理，不使用真实数据库。
 
-前端继续保留占位页面，本次通过 API 使用数据层。当前无认证，仅用于本地或可信网络；公开部署并存储个人数据前需要加入认证。
+前端继续保留占位页面，本次通过 API 使用数据层。当前已加入单用户会话认证和写入 CSRF 校验。公开部署前仍须配置 HTTPS Origin、凭据及备份目录，并做生产环境验收。
 
 参考：https://nodejs.org/docs/latest-v24.x/api/sqlite.html

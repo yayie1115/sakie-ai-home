@@ -13,3 +13,9 @@ node_modules
 **/*.db-shm
 .npm-cache
 .npmrc
+
+.phase1-work
+**/owner.json
+**/*.sqlite
+**/*.sqlite-wal
+**/*.sqlite-shm

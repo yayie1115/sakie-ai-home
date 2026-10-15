@@ -24,3 +24,20 @@ credentials*.json
 *.pfx
 id_rsa
 id_ed25519
+
+# Phase 1 local data and credentials
+.phase1-work/
+owner.json
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Defense if external runtime directories are accidentally copied into this repository
+/sakie-ai-home-data/
+/sakie-ai-home-backups/
+*.db-journal
+*.sqlite-journal
+*.sqlite3
+*.sqlite3-*
+*.db3
+*.db3-*
