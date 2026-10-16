@@ -58,3 +58,9 @@
 - 旧机只读命令输出：Caddy `active`（`/lib/systemd/system/caddy.service`）；`aru-selfhost.service` 为 enabled（仍未停用）；`caddy_api.service` disabled、`caddy.service` enabled。`phosphene-app-1` 已见 healthy；其 Docker Mount 输出为 `bind | /data`（此处 `/data` 是容器内目标路径，**尚不知宿主机 Source 路径**）。
 - Node 8787 和 Python 8899 进程的 cwd 分别为 `/` 和 `/root`，不能据此确认归属。待补只读信息：Phosphene bind mount Source 与只读容量/文件类型元数据、项目启动配置文件所在位置及备份方法；避免输出 `.env`/令牌/内容。
 - **禁止在备份与恢复验证前删除容器、宿主机挂载源、Docker 卷或旧机**。AruHost 待淘汰决定不等于已获执行删除授权。
+
+## 2026-10-16 Phosphene 数据源确认（OrcaTerm 只读）
+- 旧上海 VPS 上 `phosphene-app-1` 的容器内 `/data` 是 **rw bind mount**，宿主机 Source=`/home/ubuntu/phosphene-data`；该目录占用约 **2.2 MB**，顶层 **2 个子目录、3 个普通文件**。仅统计元数据，未读取文件正文。
+- Docker Image=`phosphene-app`，RestartPolicy=`unless-stopped`，容器此前显示 healthy。镜像名称不能证明存在可从公共注册中心重新拉取的镜像；需要核实构建源码/部署配置及安全恢复手段。
+- 用户明确 Phosphene 有必须保留的历史数据，须在旧机到期（2026-10-22）前，制定受控短暂停写窗口，获得一致性备份、保存到旧机以外的安全位置，并验证恢复及程序可启动；备份不进入公共 GitHub。当前**尚未执行备份/迁移/停机**，不能把 2.2MB 视为已安全保全。
+- AruHost 不迁移的决定不影响 Phosphene 的保全。未来作为小家的 MCP 玩具仅为需求意向，不代表已实现接口或已授权公开其访问端口。
