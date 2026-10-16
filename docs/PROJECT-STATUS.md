@@ -52,3 +52,9 @@
 - 用户截图另显示旧机 `caddy` 监听 80/443/8443、Node 8787、Python 8899。服务归属与是否属于 AruHost/Phosphene 未证实，**先做对应关系核对，不能全部删或全部迁**。
 - 旧机经腾讯云 OrcaTerm 网页终端管理，**没有配 Windows SSH**。不要求用户为了盘点另配 SSH；可通过已有网页终端执行限定只读命令并让 Chat 汇总脱敏结果。
 - 调整迁移方案：保留 Phosphene 的必要文件/配置和数据（安全离机副本），决定新机的隔离运行方式后再迁；AruHost 及相关进程待确认无其它依赖后再单独申请停用/清理许可；部署小家仍需独立验收。
+
+## 2026-10-16 旧机 OrcaTerm 补充证据：Phosphene 有须保留历史数据
+- 用户明确：Phosphene **已有需要保留的历史数据**；其迁移优先级为“先制作可恢复的离机备份并验证，再考虑停旧机/恢复新机”，不得仅迁 Docker 镜像。
+- 旧机只读命令输出：Caddy `active`（`/lib/systemd/system/caddy.service`）；`aru-selfhost.service` 为 enabled（仍未停用）；`caddy_api.service` disabled、`caddy.service` enabled。`phosphene-app-1` 已见 healthy；其 Docker Mount 输出为 `bind | /data`（此处 `/data` 是容器内目标路径，**尚不知宿主机 Source 路径**）。
+- Node 8787 和 Python 8899 进程的 cwd 分别为 `/` 和 `/root`，不能据此确认归属。待补只读信息：Phosphene bind mount Source 与只读容量/文件类型元数据、项目启动配置文件所在位置及备份方法；避免输出 `.env`/令牌/内容。
+- **禁止在备份与恢复验证前删除容器、宿主机挂载源、Docker 卷或旧机**。AruHost 待淘汰决定不等于已获执行删除授权。
