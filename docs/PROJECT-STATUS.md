@@ -93,3 +93,7 @@
 - 用户反馈：已通过旧机 OrcaTerm 文件管理功能下载 Phosphene 的 `.tar.gz` 和 `.sha256` 至 Windows，并执行先前给出的 PowerShell SHA-256 检查，结果与预期 `BACKUP VERIFIED - SHA256 MATCH` 一致。
 - **已验证的是下载副本和原备份校验值匹配**，不等于已做隔离恢复、验证容器的数据可读，也不等于新 VPS 已部署 Phosphene。旧机数据/备份暂时保留，不删、不停用。
 - 接下来优先只读核查旧机 Phosphene 镜像构建与编排来源、启动方式和可安全迁移的必要程序资产；然后确定新机恢复/验收方案。公共仓库不得保存真实数据或秘密。
+
+## 2026-10-17 Phosphene 旧机部署来源确认
+- 旧 VPS OrcaTerm 截图确认容器 `phosphene-app-1` 恢复到 `healthy`（截图中 Up 3 minutes）。Docker Compose 标签：Project=`phosphene`、WorkingDir=`/home/ubuntu/phosphene`、ConfigFiles=`/home/ubuntu/phosphene/docker-compose.yml`；发现 `/home/ubuntu/phosphene/Dockerfile`。本地镜像 `phosphene-app` 存在，约 119 MB，不能据此推断镜像可公开拉取。
+- 下一步核对该项目构建上下文及启动依赖、敏感配置文件的存在性（不读取秘密值），准备将程序资产及已经完成 SHA256 检查的私有数据备份安全搬到新 VPS。切勿将 .env、数据归档、私钥提交公开 GitHub；实际重建、恢复和网络切换仍待分步验收。
