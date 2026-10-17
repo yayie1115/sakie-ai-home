@@ -120,3 +120,11 @@
 - `tools/windows-acl-executor-lab.ps1`
 - `tools/windows-acl-scope.ps1`
 - `tools/windows-acl.ps1`
+
+## 普通合并保留的远程文档
+
+以下来自已扫描的既有origin/main历史，未从私人数据目录导入：
+
+- `docs/first-usable-ui-acceptance.md`
+- `docs/reviews/2026-10-16-vps-inventory-and-minimal-migration.md`
+- `"docs/sakie-ai-home-\344\272\247\345\223\201\351\234\200\346\261\202\344\270\216\344\272\244\344\272\222\350\247\204\350\214\203-v1.1.md"`
