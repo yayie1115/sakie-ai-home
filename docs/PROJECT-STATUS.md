@@ -273,3 +273,8 @@
 - Windows普通令牌临时任务实际 ValidateOnly/注册/按需执行、子进程异常重启、停止无残留均通过并移除；实际登录切换/整机重启未测试。新增定向11/11，受影响旧配置/合成候选测试各1/1；未重跑132项、既有公网同步或历史副本迁移。
 - 修复退避停止、未知状态盲重启、任务XML编码；新增同镜像无宿主Node的维护CLI，已验证无DB挂载的导入模式。空闲采样后端19.6MiB、验收Nginx2.602MiB，非峰值。
 - [本轮唯一交付报告与证据](reviews/2026-10-17-phase2-isolated-deployment-acceptance.md)；tools/activation/RUNBOOK.md已补八步执行卡。待一次集中授权：最新主库停写备份/候选、精确新目录及.env权限、独立API部署、新正式设备追平/封存身份/登录后任务。先确定域名、独立加密备份落点和登录后运行方式；不自行进入生产。
+
+## 2026-10-17 第二阶段：文件级加密备份合成验收（正式备份未授权）
+- 用户确认F BitLocker100%但保护关闭/无保护器，暂不更改且不依赖微软登录；改用标准age密码认证加密。F只存密文，E私有临时区/恢复目标；尚未创建F真实目录或处理真实数据。
+- tools/backup复用现有一致性backup/verify/restore，隐藏TTY密码、不接受秘密argv/env/普通文件/管道，随机盐/nonce、认证后恢复、排他目标与中断pending/owned清理。新24/24、四工作区typecheck/生产build通过，官方npm audit0；不重跑132项/首尔验收。
+- [加密备份交付与精确授权清单](reviews/2026-10-17-phase2-encrypted-backup-acceptance.md)、[操作说明](../tools/backup/README.md)；RUNBOOK已撤回旧F明文复制/恢复方案。强杀/断电可能留下E明文，不能声称安全擦除/零明文；真实使用前须审阅并接受该边界或另行批准加密临时存储。未改正式ACL、BitLocker、真实库/凭据、云端或DNS，不自行进入正式备份。

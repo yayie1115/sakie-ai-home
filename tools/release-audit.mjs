@@ -17,7 +17,7 @@ export function classify(path){
 }
 export function findings(text){
  const result=[];
- if(/-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]{20,}/.test(text))result.push('credential-signature');
+ if(/-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAGE-SECRET-KEY-[A-Z0-9]{20,}|\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]{20,}/.test(text))result.push('credential-signature');
  if(/S-1-5-21-(?:\d+-){2,}\d+|[A-Z]:[\\/]Users[\\/][^\s\\/]+/i.test(text))result.push('machine-identity');
  for(const match of text.matchAll(/\b(?:api_?key|password|token|secret)\s*[:=]\s*['"]([A-Za-z0-9_./+=-]{24,})['"]/gi))if(!/test|synthetic|fake|example|placeholder/i.test(match[1]))result.push('sensitive-assignment');
  for(const line of text.split(/\r?\n/))if(/^[A-Z_]*(?:API_KEY|PASSWORD|TOKEN|SECRET)\s*=\s*\S{16,}/.test(line)&&!/(?:example|test|fake|placeholder)/i.test(line))result.push('environment-secret');

@@ -24,9 +24,13 @@
     "test:sync:https": "node --test tools/https-sync/acceptance.test.mjs",
     "activation:checkpoint": "node tools/activation/checkpoint.mjs",
     "activation:rehearse": "node tools/activation/rehearse.mjs",
-    "test:activation": "node --test tools/activation/activation.test.mjs"
+    "test:activation": "node --test tools/activation/activation.test.mjs",
+    "backup:encrypted": "node tools/backup/cli.mjs",
+    "test:backup:encrypted": "node --test tools/backup/encrypted.test.mjs"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "age-encryption": "0.3.1",
+    "concurrently": "^9.2.1",
+    "tar-stream": "3.2.2"
   }
 }

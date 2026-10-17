@@ -73,3 +73,10 @@ owner.json.*
 *.keystore
 id_ecdsa
 id_dsa
+# Encrypted archives are still private backup data, never source artifacts.
+*.age
+*.age.partial-*
+*.agekey
+operation.pending.json
+.encrypted-restore-owner.json
+/encrypted-backups/
