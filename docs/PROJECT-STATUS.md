@@ -172,3 +172,10 @@
 ## 2026-10-17 Phosphene G2 新增记录定位（待解释）
 - 用户在首尔实验 baseline 与 runtime-copy 之间只读比较确认：`audit_logs` 338→341（+3），`point_ledger` 213→215（+2）；脚本输出 `DIFF_CHECK_COMPLETE`。尚未核实新增行的业务来源，尤其积分流水可能影响业务余额/任务状态，不能仅凭主键未缺失/数量增长就判定无损或准许生产切换。
 - 下一步优先静态代码审查 seed/reconcile/过期任务对这两表的写入条件，并在隔离副本只读核对新增行的类型/关联/时间（不要公布历史正文、用户名、令牌、地址）；必要时验证积分余额与流水聚合一致。不得清除这5行、修改 baseline 或回灌旧机。已完成的数据库完整性、附件和容器重启测试无需重复。
+
+## 2026-10-17 Phosphene 最终备份恢复与断网启动（用户确认）
+- 用户在旧上海 VPS 经 OrcaTerm 执行已批准停机和最终一致性备份，反馈成功；旧容器按脚本设置 restart=no 并停止。用户通过 Windows 将最终 tar.gz 与 sha256 上传首尔，反馈首尔 SHA 校验成功。
+- 最新备份在首尔新建独立 phosphene-final-candidate baseline/runtime-copy，用户反馈 FINAL_CANDIDATE_READY（归档路径检查、SQLite完整性/外键、附件数量均通过）。
+- 使用既有 phosphene-lab:isolated 镜像在 network=none、无映射端口、restart=no、仅新 runtime-copy bind 数据的环境中运行终验；用户反馈最终批次完成（预期健康200、原历史主键/附件、SQLite验证通过）。此处为用户反馈，未提供终端逐项截图，需以终验完整输出作为详细证据。
+- 尚未完成：清理后循环任务/待办最终DB状态的独立核对；用户登录历史可读性确认；正式运行实例安全环境变量与访问通道/HTTPS；新旧数据终态比对及正式切换。**旧机保持停止，DNS/Nginx未授权更改，测试容器按脚本停止。**
+- 避免再重复构建或重新迁移测试。下一步限定只读 introspection 确认任务系列和未完成任务状态；随后准备以最新baseline另开正式运行数据副本，避免直接拿已发生启动副作用的测试runtime-copy作为正式基线。
