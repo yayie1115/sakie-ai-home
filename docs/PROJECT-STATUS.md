@@ -102,3 +102,7 @@
 - 截图看到 `/home/ubuntu/phosphene` 包含 `docker-compose.yml`、`Dockerfile`、`docker-entrypoint.sh`、`.dockerignore`、`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`drizzle/` 迁移、`docs/DEPLOYMENT.md`、`docs/BACKUP.md`、`docs/MCP.md` 等源码/构建及文档资产。
 - 项目 `.env` **存在**，应走私密迁移路径；不得直接在聊天截图、公有 GitHub、脱敏报告中输出值。容器挂载 `/data` 为 bind，用户历史数据离机备份的 SHA256 已验证，但尚未恢复演练。
 - 下一步：查清安全构建/运行条件，保留私有环境文件、源码及 DB 的关联；按非公开方式打包必需源码（排除 .env、node_modules、数据和其他秘密），再在隔离新环境中构建及恢复，审核后才开放公网端口。
+
+## 2026-10-17 Phosphene Compose 结构确认
+- 旧上海 VPS 终端只读检查：`docker compose config --services` 输出仅 `app`；compose 采用 `build.context: .`，项目为 `/home/ubuntu/phosphene`，约 321 MB；`docker compose config --volumes` 没有输出命名卷；容器数据采用既有宿主机 bind `/home/ubuntu/phosphene-data`。
+- `git remote -v` 未显示可用远程仓库。暂不能直接在首尔通过 Git 克隆。**下一步应先核对 Dockerfile 和 .dockerignore 的构建所需文件/排除项，再安全打包源码，严禁将 `.env`、凭据及真实数据库放入公共 GitHub**。历史数据备份已离旧机、SHA256 校验通过，尚未做恢复验收。
