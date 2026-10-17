@@ -1,0 +1,12 @@
+{
+  "ordinaryToken": true,
+  "validateOnly": true,
+  "registered": true,
+  "logonTriggerConfigured": true,
+  "actualLogonTransitionTested": false,
+  "leastPrivilege": true,
+  "crashRestart": true,
+  "taskStopNoOrphans": true,
+  "removed": true,
+  "error": null
+}

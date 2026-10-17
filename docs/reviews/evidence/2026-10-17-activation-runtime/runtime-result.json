@@ -1,0 +1,37 @@
+{
+  "baseCommit": "240a39c8795a1c4d39e0913be5181b41144dfc5c",
+  "backendTree": "2af51891ee6a45ab32b241de5497a945c6f02225",
+  "imageId": "sha256:e311226d8d0804ed7853108b300ce173fa83c32470acccc31fd6dfbcc7029059",
+  "imageBytes": 314832890,
+  "containerNode": "24.22.0",
+  "docker": "29.9.1",
+  "compose": "5.6.0",
+  "supervisionTests": {
+    "total": 11,
+    "passed": 11,
+    "failed": 0,
+    "skipped": 0
+  },
+  "targetedExistingConfigTest": "passed",
+  "targetedExistingCandidateTest": "passed (synthetic only; shared runtime-loader changed)",
+  "maintenanceCheck": {
+    "runtimeImports": true,
+    "databaseOpened": false,
+    "network": "none",
+    "databaseMounts": 0
+  },
+  "afterChecks": {
+    "newContainersStopped": true,
+    "newLoopbackPortsReleased": [
+      13401,
+      13443
+    ],
+    "temporaryTaskRemoved": true,
+    "evidenceAndSyntheticDataRetained": true
+  },
+  "notRepeated": [
+    "132-test regression",
+    "public HTTPS sync acceptance",
+    "historical-data migration rehearsal"
+  ]
+}

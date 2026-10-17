@@ -258,3 +258,9 @@
 - 仓库已确认Private；本轮用户授权审查后提交完整安全源码、测试、开发文档及正式启用准备。已跟踪与未跟踪文件均扫描，不用git add -A或git add .。
 - 内容提交3ab384c；普通merge保留既有历史和最新产品规范，不采用已否决UI。详情见[同步报告](reviews/2026-10-17-private-source-sync.md)与[逐项清单](reviews/2026-10-17-private-source-sync-files.md)。
 - 四工作区typecheck/build、生产模式build通过；现有132项测试131通过/0失败/1项Win321314跳过，启用准备定向3/3通过。没有真实数据、密钥、ACL、配对、云端或DNS操作。源码同步不构成正式启用授权。
+
+## 2026-10-17 Part 2 隔离部署与持久运行验收（未正式启用）
+- main 240a39c 基线上完成真实 backend/Dockerfile 镜像构建、全新隔离 Compose/Nginx/TLS/权限/持久化/重启8组检查；结束停止新容器并释放回环端口。宿主 Nginx、现有服务、phos、DNS、真实主库/ACL/身份未改。
+- Windows普通令牌临时任务实际 ValidateOnly/注册/按需执行、子进程异常重启、停止无残留均通过并移除；实际登录切换/整机重启未测试。新增定向11/11，受影响旧配置/合成候选测试各1/1；未重跑132项、既有公网同步或历史副本迁移。
+- 修复退避停止、未知状态盲重启、任务XML编码；新增同镜像无宿主Node的维护CLI，已验证无DB挂载的导入模式。空闲采样后端19.6MiB、验收Nginx2.602MiB，非峰值。
+- [本轮唯一交付报告与证据](reviews/2026-10-17-phase2-isolated-deployment-acceptance.md)；tools/activation/RUNBOOK.md已补八步执行卡。待一次集中授权：最新主库停写备份/候选、精确新目录及.env权限、独立API部署、新正式设备追平/封存身份/登录后任务。先确定域名、独立加密备份落点和登录后运行方式；不自行进入生产。

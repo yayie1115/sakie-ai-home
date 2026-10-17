@@ -1,0 +1,79 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "name": "compose-configuration",
+      "passed": true,
+      "detail": true
+    },
+    {
+      "name": "nginx-configuration",
+      "passed": true,
+      "detail": true
+    },
+    {
+      "name": "tls-routing-auth-origin-and-ws-boundary",
+      "passed": true,
+      "detail": true
+    },
+    {
+      "name": "secure-session-csrf-and-synthetic-write",
+      "passed": true,
+      "detail": true
+    },
+    {
+      "name": "loopback-mounts-runtime-identity-resource-caps",
+      "passed": true,
+      "detail": {
+        "uid": 1000,
+        "dataMode": 448,
+        "backupMode": 448,
+        "ownerMode": 256
+      }
+    },
+    {
+      "name": "container-restart-persists-record-and-session",
+      "passed": true,
+      "detail": true
+    },
+    {
+      "name": "application-exit-unless-stopped-recovery-and-integrity",
+      "passed": true,
+      "detail": true
+    },
+    {
+      "name": "resource-snapshot-not-peak",
+      "passed": true,
+      "detail": [
+        {
+          "Name": "sakie-activation-lab-7db8599c-backend-1",
+          "CPUPerc": "0.00%",
+          "MemUsage": "19.6MiB / 512MiB",
+          "PIDs": "7"
+        },
+        {
+          "Name": "sakie-activation-lab-7db8599c-nginx-1",
+          "CPUPerc": "0.00%",
+          "MemUsage": "2.602MiB / 64MiB",
+          "PIDs": "2"
+        }
+      ]
+    }
+  ],
+  "sourceCommit": "240a39c8795a1c4d39e0913be5181b41144dfc5c",
+  "adaptations": [
+    "fresh paths/project/loopback ports",
+    "backend actual PORT 3000; health interval 2s",
+    "new bridge-only Nginx uses backend service DNS; TLS 8443, not host Nginx",
+    "self-signed test certificate, no DNS/host trust changes",
+    "empty model configuration, synthetic owner only"
+  ],
+  "notTested": [
+    "host reboot",
+    "real login transition",
+    "real credentials/data",
+    "public DNS/TLS cutover",
+    "real model requests",
+    "production peak load"
+  ]
+}
