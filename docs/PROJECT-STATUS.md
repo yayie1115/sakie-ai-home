@@ -209,3 +209,9 @@
 - 之前一次容器重启出现 relay 绑定旧命名空间，手动重启 relay 才恢复。已按后续方案更新 relay 为每个新连接获取当前容器网络命名空间；截图确认服务 active/enabled、127.0.0.1:18080 正常监听、容器 running/healthy。
 - 用户执行新版容器重启等待脚本后报告成功，按脚本成功条件应为 `AUTOMATIC_RECOVERY_PASS`；不需要再人工重启 relay。手机正式 HTTPS 登录和证书续签 dry-run 此前均反馈成功。
 - 尚未验证**整台 VPS 断电/重启**后的服务恢复；应先只读检查 Docker、relay、nginx、certbot 定时器和依赖顺序，取得用户单独同意后才进行整机重启演练。旧上海 VPS 及备份保留，小家主域名 DNS 不变。
+
+## 2026-10-17 旧上海 VPS 退役前现场核查
+- 用户在旧机 OrcaTerm 截图确认：`phosphene-app-1` Running=false、Restart=no；当前 `docker ps` 无运行中容器；最初数据备份及最终数据备份 `.tar.gz`、`.sha256` 都仍在 `/home/ubuntu/phosphene-backups`，最终备份大小约1.65MB。
+- 旧机 `caddy` 与 `aru-selfhost` 仍 active；根盘40GB、已用15GB、可用24GB。用户之前决定不迁移 AruHost，Phosphene 已在首尔 `phos.sakiehome.icu` 进行手机 HTTPS 登录与历史验收。
+- **待办**：检查并关闭旧 VPS 自动续费（不提前销毁）；旧机2026-10-22到期前处理 `sakiehome.icu`、`www` 两条仍指向旧上海 IP 的 DNS，须先完成首尔小家网站入口上线及定向HTTPS验收、用户同意后才切换；不应未经测试直接切到测试页。
+- 不建议在到期前逐个删除旧机 Docker/应用目录；最终备份已经保存在 Windows 和首尔，仍要确保旧机其他需要保留的数据/账号密钥已盘点。旧机到期不等于已安全擦除数据。
