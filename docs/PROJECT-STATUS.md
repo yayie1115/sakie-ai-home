@@ -97,3 +97,8 @@
 ## 2026-10-17 Phosphene 旧机部署来源确认
 - 旧 VPS OrcaTerm 截图确认容器 `phosphene-app-1` 恢复到 `healthy`（截图中 Up 3 minutes）。Docker Compose 标签：Project=`phosphene`、WorkingDir=`/home/ubuntu/phosphene`、ConfigFiles=`/home/ubuntu/phosphene/docker-compose.yml`；发现 `/home/ubuntu/phosphene/Dockerfile`。本地镜像 `phosphene-app` 存在，约 119 MB，不能据此推断镜像可公开拉取。
 - 下一步核对该项目构建上下文及启动依赖、敏感配置文件的存在性（不读取秘密值），准备将程序资产及已经完成 SHA256 检查的私有数据备份安全搬到新 VPS。切勿将 .env、数据归档、私钥提交公开 GitHub；实际重建、恢复和网络切换仍待分步验收。
+
+## 2026-10-17 Phosphene 构建目录进一步核验（旧机终端）
+- 截图看到 `/home/ubuntu/phosphene` 包含 `docker-compose.yml`、`Dockerfile`、`docker-entrypoint.sh`、`.dockerignore`、`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`drizzle/` 迁移、`docs/DEPLOYMENT.md`、`docs/BACKUP.md`、`docs/MCP.md` 等源码/构建及文档资产。
+- 项目 `.env` **存在**，应走私密迁移路径；不得直接在聊天截图、公有 GitHub、脱敏报告中输出值。容器挂载 `/data` 为 bind，用户历史数据离机备份的 SHA256 已验证，但尚未恢复演练。
+- 下一步：查清安全构建/运行条件，保留私有环境文件、源码及 DB 的关联；按非公开方式打包必需源码（排除 .env、node_modules、数据和其他秘密），再在隔离新环境中构建及恢复，审核后才开放公网端口。
