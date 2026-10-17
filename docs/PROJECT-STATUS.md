@@ -106,3 +106,8 @@
 ## 2026-10-17 Phosphene Compose 结构确认
 - 旧上海 VPS 终端只读检查：`docker compose config --services` 输出仅 `app`；compose 采用 `build.context: .`，项目为 `/home/ubuntu/phosphene`，约 321 MB；`docker compose config --volumes` 没有输出命名卷；容器数据采用既有宿主机 bind `/home/ubuntu/phosphene-data`。
 - `git remote -v` 未显示可用远程仓库。暂不能直接在首尔通过 Git 克隆。**下一步应先核对 Dockerfile 和 .dockerignore 的构建所需文件/排除项，再安全打包源码，严禁将 `.env`、凭据及真实数据库放入公共 GitHub**。历史数据备份已离旧机、SHA256 校验通过，尚未做恢复验收。
+
+## 2026-10-17 Phosphene archive transfer to Seoul verified
+- Windows SCP transferred three files into Seoul VPS user-private `~/phosphene-migration/`: source archive `phosphene-source-export.tar.gz`, history/data backup `phosphene-20261017T055917Z.tar.gz`, and matching `.sha256`. All three SCP transfers reached 100%.
+- First checksum command failed because the `.sha256` entry contained the old VPS's absolute path; this was a **path mismatch, not evidence of corruption**. Subsequent read-only checksum command stripped old path in a pipe and validated the archive on Seoul; user confirmed it returned the expected success output. Source tar list read succeeded. No Docker deployment/restore or DNS changes yet.
+- Next: check Seoul Docker/Compose and source archive structure; stage isolated restore, retaining original tarballs unchanged. Verify runtime health and user data before any cutover. Do not expose Phosphene port publicly or upload backups to public GitHub.
