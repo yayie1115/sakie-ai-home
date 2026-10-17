@@ -161,3 +161,10 @@
 - **边界**：真实DB/备份/ACL/密钥未改，只有新合成夹具；未验证真实公网/物理断电/浏览器端或付费模型。清理仍关闭。源码改动及可运行测试仍在原未提交工作区，GitHub本轮只提交报告与状态，不能声称远程main已有完整第二阶段代码。
 - 下一步：本次隔离核心阻塞已解决；Chat审阅后确定完整源码安全发布及真实存储权限、迁移/设备配对/公网链路验收的批量授权。阶段二总体仍待这些真实启用门槛，不把本轮通过宣称生产或第三阶段完成；不提前扩展记忆/自主活动/群聊/复杂UI/MCP。
 
+
+## 2026-10-17 Phosphene G2 隔离恢复进展（用户终端截图佐证）
+- 用户已批准 G2 并在首尔 VPS 手工执行：源码安全解包、派生镜像构建，终端输出 BUILD COMPLETE；创建 baseline/migration-copy/runtime-copy，隔离 network=none、PortBindings={}；迁移仅在 migration-copy 执行，复跑输出 migrations are up to date。
+- runtime-copy 容器断网启动，短暂 starting 后达到 running/healthy，容器内 /healthz 返回 HTTP 200；之后按测试脚本停止。原数据 tar、Windows 备份、旧机、Nginx、DNS 均未作为本轮更改目标。
+- 用户截图的初步只读核对：baseline/runtime SQLite integrity_check 都为 ok，表数量 21→21；uploads 4→4 且文件 SHA256 一致；两张表行数增加 338→341、213→215，**尚不清楚具体表及新增记录含义**。
+- 后续截图：21张声明主键的表均比较，MISSING_HISTORICAL_KEYS=0、无跳过；相同 runtime 容器重新启动达到 running/healthy，停止后 SQLite integrity=ok、foreign_key_issues=0、历史附件4个字节摘要全一致，PERSISTENCE_CHECK_PASS。
+- **阶段结论**：G2 技术性离线副本恢复/重启检查取得通过证据，但不能等同生产切换或业务历史全量验收：需解释两表+3/+2变动、确认用户历史账号和内容可读，且旧机后续写入必须在最终切换时做一致性增量/停写备份。实验容器结束后已停止，禁止直接外网暴露、自动重启或 DNS 切换。Phosphene 和小家正式第二阶段为不同工作线。
