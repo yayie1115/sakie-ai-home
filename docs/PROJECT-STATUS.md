@@ -111,3 +111,7 @@
 - Windows SCP transferred three files into Seoul VPS user-private `~/phosphene-migration/`: source archive `phosphene-source-export.tar.gz`, history/data backup `phosphene-20261017T055917Z.tar.gz`, and matching `.sha256`. All three SCP transfers reached 100%.
 - First checksum command failed because the `.sha256` entry contained the old VPS's absolute path; this was a **path mismatch, not evidence of corruption**. Subsequent read-only checksum command stripped old path in a pipe and validated the archive on Seoul; user confirmed it returned the expected success output. Source tar list read succeeded. No Docker deployment/restore or DNS changes yet.
 - Next: check Seoul Docker/Compose and source archive structure; stage isolated restore, retaining original tarballs unchanged. Verify runtime health and user data before any cutover. Do not expose Phosphene port publicly or upload backups to public GitHub.
+
+## 2026-10-17 DNS 控制台截图确认（未执行切换）
+- 腾讯云 Lighthouse 域名解析页面显示 `sakiehome.icu` 与 `www.sakiehome.icu` 各有一条正常的 A 记录，均指向旧 VPS `122.51.204.197`；该视图显示共两条记录。新首尔 VPS 目标 IP `43.133.73.31`。此为控制台截图证据，不代表另行独立实时 DNS 探测。
+- **DNS 未变更**。切换前需小家正式服务/反代通过新机定向访问验收，核实 `www` TLS SAN 覆盖或配置重定向及匹配证书，并准备回滚；不能因为新机测试站 HTTPS 200 就立刻切解析。待部署验证后，经用户明确同意再修改两条 A 记录。
