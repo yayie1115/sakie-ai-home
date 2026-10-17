@@ -53,7 +53,11 @@ export class SqliteMemoryLab {
     if(!hits.length) return {status:'no_match',memories:[]};
     // Eligibility comes from current source scope, valid version, revision chain and owner.
     const snap=pipeline.snapshot();
-    const source=new Map(snap.events.map(e=>[`${e.source.id}::${e.source.version}`,e.source]));
+    // Resolve only the latest source state for each id. Never treat older
+    // versions in a legacy/corrupt snapshot as concurrently valid.
+    const latestSource=new Map<string,typeof snap.events[number]["source"]>();
+    for(const e of snap.events) latestSource.set(e.source.id,e.source);
+    const source=new Map([...latestSource.values()].filter(s=>s.active&&!s.deleted).map(s=>[`${s.id}::${s.version}`,s]));
     const current=new Set(snap.candidates.map(c=>c.id));
     for(const c of snap.candidates) if(c.supersedes && current.has(c.supersedes)) {
       const s=source.get(`${c.sourceId}::${c.sourceVersion}`);

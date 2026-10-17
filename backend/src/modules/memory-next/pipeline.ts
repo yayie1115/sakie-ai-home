@@ -59,7 +59,11 @@ export class MemoryPipeline {
   recall(actor:string,query:string,limit=5):Recall { return this.store.recall(actor,query,limit); }
   snapshot():Snapshot {
     // Permanently revoked source contents and all derived claims must not be persisted.
-    const liveEvents=[...this.events.values()].filter(e=>!e.source.deleted && e.source.active);
+    // The most recent event for each source id is authoritative. An edited
+    // source must not keep its previous version in the persisted snapshot.
+    const latestById=new Map<string,SourceEvent>();
+    for(const event of this.events.values()) latestById.set(event.source.id,event);
+    const liveEvents=[...latestById.values()].filter(e=>!e.source.deleted && e.source.active);
     const liveSources=new Set(liveEvents.map(e=>`${e.source.id}::${e.source.version}`));
     const candidates=[...this.candidates.values()].filter(c=>liveSources.has(`${c.sourceId}::${c.sourceVersion}`));
     const validIds=new Set(candidates.map(c=>c.id));
