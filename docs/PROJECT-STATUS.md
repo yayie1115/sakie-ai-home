@@ -184,3 +184,8 @@
 - 用户同意全部停用剩余4个循环系列，仅在首尔独立 deploy-copy 修改 active 1→0；用户确认 SQLite integrity=ok、foreign_key_issues=0。随后已创建并 SHA 校验 deploy-ready 独立压缩快照；原最终备份及 baseline 未覆盖。
 - 基于 deploy-copy 复制 verification-copy，在 Docker network=none、无端口映射、restart=no 环境启动同一镜像。用户反馈 `TASK_DISABLE_RUNTIME_PASS` 及预期 HTTP200、AFTER_ACTIVE_SERIES=0、AFTER_PENDING_TASKS=0 等检查成功；测试容器按脚本已停止。这是用户终端结果反馈，非连接器直接实测。
 - **下一阶段重点是私人实际登录验证和受控正式部署**，不再重新做已通过的迁移/任务统计。不得直接将 verification-copy 上线，不开放 webhook 出站，不擅自切 DNS/Nginx；如需可达的实例先核实环回端口及容器网络出站阻断，HTTPS Secure Cookie登录配置，必要敏感配置通过私人路径设置。旧VPS仍停机、原始备份保留。
+
+## 2026-10-17 Phosphene 私人浏览器访问与原账号登录通过（用户确认）
+- 首尔 `phosphene-private-live` 处于 Docker `network=none`，宿主 `nsenter` 进入该网络空间的内部 `/healthz` 返回200。用户通过仅本机转发 `127.0.0.1:18080` + Windows SSH `-L` 访问到了 Phosphene 登录页，并明确反馈使用原账号**登录成功**。
+- 这证明私人网页通道及已有账号认证可用；仍待用户核对旧积分余额（此前界面报告8244）、历史任务/流水及附件是否在新机正常显示。登录成功**不等于**长期 HTTPS 入口、自动启动/转发服务、出站隔离及DNS切换已完成。
+- 当前私人转发依赖临时终端/SSH连接，暂不要关闭直至用户查完历史；旧机停机，原始和deploy-ready备份均保留。下一步先进行用户业务数据目视验收，再提出长期安全入口方案；未经明确授权不变更Nginx/DNS/生产端口或重启策略。
