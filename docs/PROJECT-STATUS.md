@@ -204,3 +204,8 @@
 - `phos.sakiehome.icu` 指向首尔 VPS，新 Nginx 站点与 TLS 证书已存在；截图显示 Nginx、phosphene-relay 均 active，首尔本机域名 SNI HTTPS `/healthz` HTTP200。
 - 用户随后用手机访问正式 HTTPS 地址，使用原账号登录成功并表示没有问题。这意味着手机号外网浏览器的实际访问/认证链路已通过用户验收。
 - **尚待收尾**：容器自动重启配置（此前 `restart=no`）、转发服务在容器重建/重启后的命名空间重新绑定及 systemd 启动顺序、certbot 自动续签定时器及 dry-run、服务重启验收与备份可恢复性。无需再重复数据库迁移/登录历史验收；旧机数据与 Windows/首尔备份继续保留，不要自动删除或改变主域名解析。
+
+## 2026-10-17 Phosphene 容器重启自动恢复通过（用户确认）
+- 之前一次容器重启出现 relay 绑定旧命名空间，手动重启 relay 才恢复。已按后续方案更新 relay 为每个新连接获取当前容器网络命名空间；截图确认服务 active/enabled、127.0.0.1:18080 正常监听、容器 running/healthy。
+- 用户执行新版容器重启等待脚本后报告成功，按脚本成功条件应为 `AUTOMATIC_RECOVERY_PASS`；不需要再人工重启 relay。手机正式 HTTPS 登录和证书续签 dry-run 此前均反馈成功。
+- 尚未验证**整台 VPS 断电/重启**后的服务恢复；应先只读检查 Docker、relay、nginx、certbot 定时器和依赖顺序，取得用户单独同意后才进行整机重启演练。旧上海 VPS 及备份保留，小家主域名 DNS 不变。
