@@ -179,3 +179,8 @@
 - 使用既有 phosphene-lab:isolated 镜像在 network=none、无映射端口、restart=no、仅新 runtime-copy bind 数据的环境中运行终验；用户反馈最终批次完成（预期健康200、原历史主键/附件、SQLite验证通过）。此处为用户反馈，未提供终端逐项截图，需以终验完整输出作为详细证据。
 - 尚未完成：清理后循环任务/待办最终DB状态的独立核对；用户登录历史可读性确认；正式运行实例安全环境变量与访问通道/HTTPS；新旧数据终态比对及正式切换。**旧机保持停止，DNS/Nginx未授权更改，测试容器按脚本停止。**
 - 避免再重复构建或重新迁移测试。下一步限定只读 introspection 确认任务系列和未完成任务状态；随后准备以最新baseline另开正式运行数据副本，避免直接拿已发生启动副作用的测试runtime-copy作为正式基线。
+
+## 2026-10-17 Phosphene 循环任务禁用运行验收（用户反馈）
+- 用户同意全部停用剩余4个循环系列，仅在首尔独立 deploy-copy 修改 active 1→0；用户确认 SQLite integrity=ok、foreign_key_issues=0。随后已创建并 SHA 校验 deploy-ready 独立压缩快照；原最终备份及 baseline 未覆盖。
+- 基于 deploy-copy 复制 verification-copy，在 Docker network=none、无端口映射、restart=no 环境启动同一镜像。用户反馈 `TASK_DISABLE_RUNTIME_PASS` 及预期 HTTP200、AFTER_ACTIVE_SERIES=0、AFTER_PENDING_TASKS=0 等检查成功；测试容器按脚本已停止。这是用户终端结果反馈，非连接器直接实测。
+- **下一阶段重点是私人实际登录验证和受控正式部署**，不再重新做已通过的迁移/任务统计。不得直接将 verification-copy 上线，不开放 webhook 出站，不擅自切 DNS/Nginx；如需可达的实例先核实环回端口及容器网络出站阻断，HTTPS Secure Cookie登录配置，必要敏感配置通过私人路径设置。旧VPS仍停机、原始备份保留。
