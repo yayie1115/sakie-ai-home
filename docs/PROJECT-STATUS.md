@@ -88,3 +88,8 @@
 - 截图确认压缩包 `/home/ubuntu/phosphene-backups/phosphene-20261017T055917Z.tar.gz` 大小约 **1.6 MB**，同路径有对应 `.sha256`（约 131 字节），权限 `600 root:root`；终端提示 `BACKUP CREATED - NOT YET OFF SERVER`。容器重启时为 `health: starting`，**尚待证实变为 healthy**。
 - 备份尚未离开旧 VPS；`tar -tzf` 仅证明归档可读，不等于已经完成**异机恢复演练**。下一步核实 Docker 健康，再采用受控、加密的方式将备份和校验文件转移到 Windows 私有目录或首尔新 VPS，校验 SHA-256、实施隔离恢复测试。**不要把备份放进公开 GitHub，不要在未确认传输方向/权限前执行用户终端里尚未运行的 scp 草稿。**
 - 旧机数据、容器及 AruHost 均未获删除授权，DNS 未切换。搬迁完工仍未验收。
+
+## 2026-10-17 Phosphene 离机备份 SHA-256 校验通过
+- 用户反馈：已通过旧机 OrcaTerm 文件管理功能下载 Phosphene 的 `.tar.gz` 和 `.sha256` 至 Windows，并执行先前给出的 PowerShell SHA-256 检查，结果与预期 `BACKUP VERIFIED - SHA256 MATCH` 一致。
+- **已验证的是下载副本和原备份校验值匹配**，不等于已做隔离恢复、验证容器的数据可读，也不等于新 VPS 已部署 Phosphene。旧机数据/备份暂时保留，不删、不停用。
+- 接下来优先只读核查旧机 Phosphene 镜像构建与编排来源、启动方式和可安全迁移的必要程序资产；然后确定新机恢复/验收方案。公共仓库不得保存真实数据或秘密。
