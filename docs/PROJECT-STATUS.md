@@ -129,3 +129,15 @@
 - **未完成**：Docker安装、实际解包/恢复、SQLite完整性/账本/历史可读性/容器重启持久性；没有旧机停用、AruHost删除、真实ACL、DNS变更、MCP接入或付费调用。旧机仍是当前服务，数据与备份保留。
 - **正式第二阶段仍进行中**；Phosphene属于10月22日前并行服务搬迁，第三阶段未开始。等待Chat批量审阅G1/G2后再执行，不逐条命令索批，也不自动跨闸门。
 
+## 2026-10-17 Phosphene G1完成、G2只读准备完成（未恢复历史副本）
+
+- 新增[G1安装证据与G2准备报告](reviews/2026-10-17-phosphene-g1-install-and-g2-readiness.md)。用户本轮明确“授权执行G1”后才安装；技术审查通过没有被当成执行授权。
+- **G1已完成**：官方Docker APT noble/stable仓库，签名key主指纹核验；模拟与真实前后包清单均为恰好5个新包、0升级、0移除。固定安装Engine/CLI29.9.1、containerd.io2.4.2、Compose5.6.0、Buildx0.38.0；不安装rootless-extras/pigz、不autoremove。完整包版本与安装日志见私人新机审计，不上传原始日志。
+- **已验证**：docker/containerd/docker.socket active，Nginx仍active/enabled；用户组成员关系未变，未给用户加入docker组；Docker API仅Unix socket（660 root:docker），无TCP配置/监听。当前0容器、0镜像，无Phosphene运行或公网应用端口。
+- **站点未受影响**：原两个Nginx配置指纹及HTTPS响应体一致，80/443仍属Nginx；本机HTTP/HTTPS200，Windows定向首尔的公网TLS验证通过且200；没有改DNS或Nginx配置。
+- **网络实际变化已留证**：新增默认Docker网络、172.17.0.0/16网桥（与原记录路由无重叠）、IPv4/IPv6 Docker链；IPv4 filter FORWARD从ACCEPT变为DROP，INPUT/OUTPUT仍ACCEPT。不能宣称系统网络完全未变；未来转发型业务需另验，未清空或回灌全局防火墙。
+- **G2源码来源校验已补齐**：用户明确确认64位摘要来自旧VPS OrcaTerm实际sha256sum输出，首尔源码原包重新比对完全一致；不再阻塞于独立来源摘要，未伪造sidecar文件。旧机无需新SSH。
+- **G2仅只读准备**：migration-only入口只调用initializeDatabase/shutdownDatabase，派生Dockerfile拟在prune前额外打包该入口；完整启动副本仍有seed/过期任务/附件清理/Webhook副作用。方案统一先network_mode:none、无端口/宿主socket，先合成探针后新历史副本；不以仅绑定回环替代出站隔离。
+- **尚未实施**：未解包、构建、迁移、开历史SQLite、启动任何历史副本或验证重启持久性；未跑原项目测试；未修改旧机Phosphene/AruHost、Windows数据/备份/ACL、DNS或现有Nginx站点；无MCP接入开发。
+- 下一步等待Chat审核G1证据，并单独批准G2派生编译、网络合成探针及新夹具副本恢复/启动的限定范围与副作用。**正式第二阶段仍进行中，第三阶段未启动。**
+
