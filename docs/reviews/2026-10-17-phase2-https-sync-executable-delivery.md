@@ -1,40 +1,43 @@
-# Part 2 HTTPS 同步：可执行包与授权闸门
+# Part 2 真实 HTTPS 增量同步验收结果
 
-2026-10-17。已读取 main 最新共同状态；本轮只提交此脱敏报告，不上传业务源码或部署包。
+2026-10-17。用户已批准整批隔离验收，并单独批准 Docker internal 网络的最小 Nginx 回环适配。**Windows Agent ↔ 首尔后端的真实公网 HTTPS 合成同步已通过。**本报告更新原同一文件；只提交脱敏文档，不公开业务源码。
 
-## 实际交付
+## 实际部署与通过证据
 
-- 修改前保护 148 份 Git 可见非敏感源码/文档及哈希；没有 pull/reset/stash。原保护文件最终仅 package.json 按预期增加命令，暂存区为空。
-- 新增 tools/https-sync/：独立合成云端 cloud.mjs、专用 Dockerfile/compose.json、两个独立 Nginx 模板、私有部署打包器、Windows 只读权限检查/准备入口、一键 accept.mjs、TLS 隔离测试及随包 OPERATIONS.md。复用现有协议、AuthService、ChatService、HttpSyncTransport、SyncRunner、LocalArchive 和编译后 Agent CLI；没有改业务 schema 或生产服务代码。
-- 命令：npm run prepare:sync:https；npm run test:sync:https。
-- 最终私有包：项目 .phase1-work/https-deploy-e0776eec-7247-4129-892e-1bcaf7770b26.tar.gz，54 个显式清单文件；SHA-256：`fbd5495988aa40001834b1c7518c8d84f313071cd5cb9c36bff0d664419c4fe1`。包含编译后端及运行依赖锁文件，不含 node_modules、真实配置、数据库、测试身份、密钥或媒体。仅在获批后经 SSH 私密传送。
-- 一键验收在获批后运行：`node tools/https-sync/accept.mjs --run <新私有验收目录> --authorized-remote-run`。先使用既有 approve-production 终端确认，将精确 origin、策略哈希、归档/凭据路径绑定；不绕过确认。密码仅通过既有 SSH 私密读取新合成身份到进程内存，不打印、不存 Windows；测试设备最终撤销，失败留证，不自动清理。
+- 私密传输的原包 SHA-256：`fbd5495988aa40001834b1c7518c8d84f313071cd5cb9c36bff0d664419c4fe1`；首尔安全解包及 54 个文件哈希通过，专用镜像实际构建成功，运行用户 1000:1000。
+- 新范围仅 /srv/sakie-sync-acceptance：release、合成 data/identity、evidence、ACME webroot。data/identity=0700，身份文件=0600、运行时只读挂载；数据库文件实际0644，但父目录0700阻止其他普通用户访问，不可脱离私有目录搬移。没有挂载/迁移真实数据库或备份。
+- 新域名 sync-check.sakiehome.icu 的 A=43.133.73.31，无 AAAA；用户完成 DNS。专用证书签发成功，实际客户端正常验证 TLS；新独立 80/443 站点与回环3301转发已启用，未改原站点文件。健康入口：https://sync-check.sakiehome.icu/api/health；/ws=404，未认证业务API=401。
+- Windows 仅新建 E盘 https-acceptance-e0776eec-7247-4129-892e-1bcaf7770b26 私有目录：普通用户所有，阻断父目录继承，仅该用户、SYSTEM、Administrators；用户对当前及未来文件有 Modify。用户亲自在既有终端入口确认精确 HTTPS 目标及路径绑定；前后私有检查通过。真实 .env、旧数据根、备份及旧测试夹具 ACL 未动。
 
-## 本轮新增验证
-
-6/6 通过、0 失败、0 跳过；未重跑旧完整回归或已有浏览器演示。
-
-| 验证 | 结果 |
+| 本次真实链路验收 | 结果 |
 | --- | --- |
-| 部署包白名单/清单哈希/归档路径 | 通过；acceptance.env 仅新 run ID 和公开 origin，无密钥 |
-| 拒绝重复初始化、未知库、已初始化但缺失的库 | 通过；不接纳/覆盖已有数据 |
-| 错误服务标记 | 登录密码回调及数据库创建前停止 |
-| 远程地址/未批准生产策略、旧验收资产 | 请求前阻断，不复用旧结果 |
-| Windows 私有目录入口 | 两脚本 Windows PowerShell 解析通过；非私有新夹具只读拒绝，无 ACL 写入 |
-| 本机实际 TLS + 独立云进程 + Windows Agent | 证书严格验证；未信任测试 CA 的客户端拒绝连接，测试 CA 仅子进程信任、不写系统证书库。正常认证/CSRF/Origin、实际 CLI、重复发送、自动断线重连、ACK 丢响应、云端进程结束/重启、撤销阻断均通过 |
+| 正常用户认证 / CSRF / 错误Origin / 设备权限分离 | 通过；设备凭据不能访问用户业务API |
+| 实际编译后的 Windows Agent CLI 及重复发送 | 通过；同客户端ID重用消息收据，没有重复模型调用 |
+| Agent 断线、云端继续聊天、自动重连 | 通过；故障为客户端注入，非切断物理 WAN |
+| 本地事务提交后 ACK 响应丢失 | 通过；本地与云端已可靠落盘，重传不重复 |
+| 首尔验收容器重启及游标恢复 | 通过；同一容器/IP，持久化身份、ACK及消息保留；没有重启Docker主服务或VPS |
+| 双端完整性与原始数据 | 云v4、本地归档v1，integrity_check均ok；6条消息/6个事件的ID、顺序、内容哈希一致，ACK=本地游标=6；云端3次假模型调用，原文仍6条，未执行清理 |
+| 设备撤销 | 已撤销临时设备，云端activeDevices=0；本地retry=blocked为撤销后的预期安全状态，未安装常驻代理 |
 
-TLS 场景最终 6 条原始消息、6 个事件、3 次假模型调用；两端消息 ID/顺序/内容哈希一致，ACK=本地游标=6；云库 v4、完整性检查通过，设备已撤销。网络故障为客户端注入，非物理 WAN 中断。后端/Agent 构建及 git diff --check 通过。源码安全扫描：133 个候选、28 个人工复核项、0 阻断；3 份机器身份文档仍隔离，完整源码未提交/公开。
+## 执行中发现并解决的问题
 
-## 一次性最小授权清单（尚未执行）
+1. Docker 29.9.1 接受 PortBindings，但仅 internal 网络实际未发布端口；容器自身健康，宿主直达其172.19.0.2:3000正常。先停下只读诊断，经用户追加确认后，仅新增 Nginx 127.0.0.1:3301 → 该私网IP 转发；保留 internal 网络，未改Docker全局设置或接入普通出站网络。与 [Moby上游现象记录](https://github.com/moby/moby/discussions/53256)一致，结论以本机inspect/监听实测为准。
+2. prepare-windows.ps1 误用同进程脚本的 LASTEXITCODE；改为独立 Windows PowerShell 检查进程读取真实退出码，未重写已通过ACL。隔离回归已复现旧失败并验证修复。
+3. Node子进程继承 PowerShell7模块路径，导致Windows PowerShell5无法加载Get-Acl模块；accept.mjs仅清理该子进程PSModulePath，使其加载自身模块，不改系统/用户环境配置或权限。同时新增无凭据的阶段诊断。
+4. 新Nginx reload后第一次HTTP探测短暂命中旧worker返回404；只读复查及公网探测随后200，没有以修改其他站点解决。证书申请在公网ACME路径通过后才执行。
 
-1. **首尔独立验收实例**：通过已验证 SSH 别名 sakie，只读确认端口/资源/phos 基线后，私密上传本包，在新 /srv/sakie-sync-acceptance/{release,data,identity,evidence,acme} 范围施工。仅新 data/identity 为容器 UID1000 私有目录；运行身份只读挂载，持久化 SQLite/WAL/SHM 在新 data。独立 Compose 项目、仅 127.0.0.1:3301、内部网络、无真实模型，日志上限 2×5MiB。384MiB/0.5 CPU 是配置上限而非实测消耗；构建前另核对余量。不安装/升级 Docker，不修改 sudo/SSH 策略。
-2. **专用 HTTPS 入口**：新增 sync-check.sakiehome.icu 指向首尔的 DNS 和独立 80/443 vhost、ACME webroot/证书；使用 certbot certonly --webroot，避免自动改其他 vhost。仅转发该主机 /api/；/ws 和其他路径 404，无 CORS/信任代理扩展。nginx -t 后受控 reload；不改主域/www、不改 phos 站点/容器/证书续期配置。仅沿用现有 certbot 定时器，不变更其他服务。
-3. **Windows 新隔离范围与临时配对**：只在 E盘新建与本包 run ID 对应的空私有目录，授权仅该目录的继承隔离 ACL（普通运行用户、SYSTEM、Administrators；运行用户及未来文件按需 Modify）。不改真实 data/cloud、备份、.env 或旧夹具 ACL。用户交互完成既有生产地址确认后，创建一个可撤销合成设备并执行一键验收；允许脚本通过固定 SSH Docker 命令读取该合成登录材料、重启且只重启验收容器。
+新增2项Windows兼容性定向回归2/2通过、0跳过；复用此前6/6隔离准备证据，本轮未重跑旧完整回归或浏览器演示。后端/Agent镜像构建实际通过；git diff --check通过。源码安全扫描133个候选、29个人工复核项、0阻断，3份机器身份文档继续隔离；暂存区为空、已跟踪敏感路径筛查为空。
 
-如 sudo 非交互能力不足、3301 已占用、目录/项目意外存在、资源不足、phos 基线异常或任何 nginx/TLS/标记检查失败，立即停止；不自动授权 sudo、不结束其他服务、不换端口扩大范围。回滚仅停止新验收容器、在受控维护下禁用新增站点并 nginx -t/reload；保留包、身份、数据库和审计，不 down -v、不恢复覆盖、不动现有备份。详细顺序和证据清单位于包内 OPERATIONS.md。
+## 非干扰、资源与留证
 
-## 未验证与结项门槛
+- default、sakie-test、sakie-https、phos站点文件SHA-256与执行前逐项一致。nginx/docker/phosphene-relay均active，phos容器healthy且原启动时间不变；phos HTTPS前后均200。未读取其业务数据/密钥，未改其配置、证书或容器。
+- 验收容器只读rootfs、内部网络、身份只读；实测向宿主公网443出站为ENETUNREACH。384MiB/0.5CPU为配置限额；执行后单次docker stats约20.49MiB、CPU0.00%，宿主可用内存2728MiB；这些是瞬时读数，不是峰值或长期容量结论。
+- 原包、manifest、新站点配置、前后哈希、Windows新目录ACL审计、双端脱敏完整性统计保留在私有/本地忽略范围。Windows新私有目录的result.json为本次通过结果。没有删除任何历史数据、原包或备份。
 
-尚未连接首尔，未部署、改 DNS/ACL、配对真实服务器或重启任何远程容器。Docker 镜像构建/Compose 执行、Nginx 语法及宿主内部网络端口可达性、实际 sudo 能力、正式 Windows 私有 ACL 正向验收、公开证书/DNS/真实公网同步仍待上述授权后验证。新入口可能受配对/登录共享代理 IP 限流，当前保守保留原机制，不擅自扩大 trust proxy。
+## 剩余边界与回退
 
-因此本轮已把“可执行准备”交付，尚不能宣布 Part 2 真实 HTTPS 验收通过。授权后直接部署这一独立包并跑同一脚本，按 result.json 与双端持久性证据结项；不再重复大型预审。Phosphene、旧 VPS、真实数据和第三阶段功能均未操作。
+- 本轮通过的是**真实HTTPS + 合成数据 + 假模型**。未迁移用户聊天库、启用长期生产设备或调用收费模型；不据此宣布整个正式数据启用完成。
+- 验收实例暂保留，restart=no；未设置Windows常驻服务，未验证整机重启/证书续签dry-run/容器重建。新证书使用webroot，现有certbot定时器及phos续签配置未改。
+- 当前回环适配固定绑定已核验容器IP。**不要直接重建容器、改网络或docker compose up触发重建后沿用旧IP**；需另行核对IP/服务标记并受控更新专用配置。同一容器restart已实测通过。这是验收拓扑的明确限制，不是长期生产自动恢复方案。
+- 若需收起验收，只停止sakie-sync-acceptance的cloud，禁用本次新增的http/https/loopback站点后nginx -t/reload；保留全部新数据/身份/审计，不down -v、不prune、不覆盖恢复，不碰phos。DNS/证书后续去留交用户决定。
+- 完整Windows源码仍未提交公开GitHub；只更新本报告。下一步由Chat审核本次公网证据，再决定第二阶段整体结项及真实存储启用范围；不提前扩展第三阶段。
