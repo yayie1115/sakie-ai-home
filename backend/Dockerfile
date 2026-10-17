@@ -16,7 +16,7 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/backend/package.json ./package.json
 COPY --from=build /app/backend/dist ./dist
-RUN mkdir -p /app/data && chown node:node /app/data
+RUN mkdir -p /app/data /app/backups /run/sakie && chown node:node /app/data /app/backups
 USER node
 EXPOSE 3000
 CMD ["node", "dist/server.js"]

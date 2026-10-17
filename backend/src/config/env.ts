@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { parseChatConfig } from '../modules/chat/config.js';
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 export const repositoryRoot = fileURLToPath(new URL('../../../',import.meta.url));
@@ -19,10 +20,11 @@ export function parseConfig(env: NodeJS.ProcessEnv) {
   const origin=new URL(rawOrigin);
   if(!['http:','https:'].includes(origin.protocol)||origin.username||origin.password||origin.pathname!=='/'||origin.search||origin.hash)throw new Error('PUBLIC_ORIGIN must be an HTTP(S) origin');
   if(nodeEnv==='production'&&(!env.PUBLIC_ORIGIN||origin.protocol!=='https:'))throw new Error('Production requires an explicit HTTPS PUBLIC_ORIGIN');
+  if(nodeEnv==='production'&&databasePath===':memory:')throw new Error('Production requires a persistent database');
   const allowedOrigins=nodeEnv==='development'&&['127.0.0.1','localhost'].includes(origin.hostname)?[origin.protocol+'//'+(origin.hostname==='localhost'?'127.0.0.1':'localhost')+(origin.port?':'+origin.port:'')]:[];
   const credentialPath=resolve(nonEmpty(env.OWNER_CREDENTIAL_FILE??join(dataDir,'auth','owner.json'),'OWNER_CREDENTIAL_FILE'));
   const sessionHours=Number(env.SESSION_HOURS??168);if(!Number.isFinite(sessionHours)||sessionHours<1||sessionHours>720)throw new Error('Invalid SESSION_HOURS');
   if(nodeEnv!=='production'){for(const target of [dataDir,backupDir,credentialPath,...(databasePath===':memory:'?[]:[databasePath])]){const rel=relative(resolve(repositoryRoot),target);if(rel===''||(!rel.startsWith('..'+sep)&&rel!=='..'&&!isAbsolute(rel)))throw new Error('Runtime storage must be outside the source project');}}
-  return Object.freeze({port,host,nodeEnv,runtimeRole,dataDir,databasePath,backupDir,credentialPath,publicOrigin:origin.origin,allowedOrigins,secureCookies:nodeEnv==='production',sessionTtlMs:sessionHours*3600000});
+  return Object.freeze({chat:parseChatConfig(env),port,host,nodeEnv,runtimeRole,dataDir,databasePath,backupDir,credentialPath,publicOrigin:origin.origin,allowedOrigins,secureCookies:nodeEnv==='production',sessionTtlMs:sessionHours*3600000});
 }
 export const config=parseConfig(process.env);

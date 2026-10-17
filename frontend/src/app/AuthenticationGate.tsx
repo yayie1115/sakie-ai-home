@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { ApiError, AuthenticatedApiContext, type AuthenticatedApi } from './api';
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 export function AuthenticationGate({children}:{children:ReactNode}){
   const [status,setStatus]=useState<'loading'|'login'|'ready'|'error'>('loading');const[password,setPassword]=useState('');const[csrfToken,setCsrfToken]=useState('');const[error,setError]=useState('');const[busy,setBusy]=useState(false);
   useEffect(()=>{let active=true;fetch('/api/auth/session',{credentials:'same-origin',cache:'no-store'}).then(async response=>{
@@ -11,8 +12,18 @@ export function AuthenticationGate({children}:{children:ReactNode}){
     const body=await response.json();setCsrfToken(body.csrfToken);setPassword('');setStatus('ready');
   }catch{setError('连接失败，请稍后重试。');}finally{setBusy(false);}}
   async function logout(){setBusy(true);try{const response=await fetch('/api/auth/logout',{method:'POST',credentials:'same-origin',headers:{'X-CSRF-Token':csrfToken}});if(response.ok||response.status===401){setCsrfToken('');setStatus('login');}else setError('退出失败，请重试。');}catch{setError('连接失败，请重试。');}finally{setBusy(false);}}
+  const api:AuthenticatedApi=useCallback(async <T,>(path:string,init:RequestInit={})=>{
+    const headers=new Headers(init.headers);
+    if(init.body)headers.set('Content-Type','application/json');
+    if(!['GET','HEAD'].includes(init.method??'GET'))headers.set('X-CSRF-Token',csrfToken);
+    const response=await fetch(path,{...init,headers,credentials:'same-origin',cache:'no-store'});
+    const body=await response.json().catch(()=>({error:'INVALID_RESPONSE'}));
+    if(response.status===401){setCsrfToken('');setStatus('login');}
+    if(!response.ok)throw new ApiError(response.status,body.error??'REQUEST_FAILED');
+    return body as T;
+  },[csrfToken]);
   if(status==='loading')return <p>正在检查登录状态…</p>;
   if(status==='error')return <p role="alert">无法连接服务，请刷新重试。</p>;
   if(status==='login')return <main><h1>sakie-ai-home</h1><form onSubmit={login}><label htmlFor="owner-password">访问密码</label><input id="owner-password" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required maxLength={256}/><button disabled={busy} type="submit">登录</button></form>{error&&<p role="alert">{error}</p>}</main>;
-  return <><button disabled={busy} onClick={logout}>退出登录</button>{error&&<p role="alert">{error}</p>}{children}</>;
+  return <><button disabled={busy} onClick={logout}>退出登录</button>{error&&<p role="alert">{error}</p>}<AuthenticatedApiContext.Provider value={api}>{children}</AuthenticatedApiContext.Provider></>;
 }

@@ -1,6 +1,5 @@
 import type { LocalArchivePort, ResumeRequest, ResumeDecision } from '@sakie/contracts';
-/** Boundary only: does not open a socket, database, HTTP port, or background timer. */
-export interface LocalAgentBoundary {
-  readonly archive: LocalArchivePort;
-  reconcile(request: ResumeRequest): Promise<ResumeDecision>;
-}
+export interface LocalAgentBoundary { readonly archive:LocalArchivePort;reconcile(request:ResumeRequest):Promise<ResumeDecision>; }
+export {LocalArchive,ArchiveError} from './archive.js';
+export {SyncRunner} from './runner.js';
+export {HttpSyncTransport} from './transport.js';

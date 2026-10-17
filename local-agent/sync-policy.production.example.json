@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "environment": "production",
+  "allowedOrigins": [
+    "https://your-server.invalid"
+  ]
+}

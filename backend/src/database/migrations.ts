@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { legacySchema } from './legacy-schema.js';
+import { chatSchema } from '../modules/chat/schema.js';
+import { syncSchema } from '../modules/sync/schema.js';
 export interface Migration { version: number; name: string; sql: string; }
 export const migrations: readonly Migration[] = [
   { version: 1, name: 'original-business-tables', sql: legacySchema },
@@ -10,8 +12,10 @@ export const migrations: readonly Migration[] = [
     "CREATE TABLE record_metadata (resource TEXT NOT NULL CHECK(resource IN ('memories','diaries','dreams','activities')), record_id TEXT NOT NULL, revision INTEGER NOT NULL CHECK(revision >= 1), provenance_status TEXT NOT NULL CHECK(provenance_status IN ('legacy_unverified','user_recorded')), deleted_at TEXT, PRIMARY KEY(resource, record_id)) STRICT;",
     ...['memories','diaries','dreams','activities'].map(table => "INSERT INTO record_metadata(resource,record_id,revision,provenance_status) SELECT '" + table + "',id,1,'legacy_unverified' FROM " + table + ';'),
   ].join('\n') },
+  { version: 3, name: 'phase2-durable-text-chat', sql: chatSchema },
+  { version: 4, name: 'phase2-incremental-archive-sync', sql: syncSchema },
 ];
-export const latestVersion = 2;
+export const latestVersion = 4;
 export const schemaVersion = (db: DatabaseSync): number => (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
 const checksum = (m: Migration) => createHash('sha256').update(m.sql).digest('hex');
 export function migrate(db: DatabaseSync, steps: readonly Migration[] = migrations, options: { afterStep?: (version: number) => void; beforeApply?: () => void } = {}) {

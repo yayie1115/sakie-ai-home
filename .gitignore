@@ -41,3 +41,35 @@ owner.json
 *.sqlite3-*
 *.db3
 *.db3-*
+
+# Local sync credentials and one-time pairing material
+agent-credentials*.json
+local-agent.json
+pairing-code*.txt
+
+# Machine-local sync policies and human approval records
+sync-production-approval*.json
+sync-policy.local.json
+acl-plan*.json
+
+# Private runtime artifacts must never enter source control
+/data/
+/media/
+/uploads/
+/recordings/
+/logs/
+/identity/
+/private-data/
+/certificates/
+owner.json.*
+*login-secret*.txt
+*.dump
+*.tar
+*.tar.gz
+*.zip
+*.7z
+*.p8
+*.jks
+*.keystore
+id_ecdsa
+id_dsa

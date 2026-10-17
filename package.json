@@ -15,7 +15,16 @@
     "dev": "concurrently -k -n backend,frontend \"npm run dev -w backend\" \"npm run dev -w frontend\"",
     "build": "npm run build --workspaces",
     "typecheck": "npm run typecheck --workspaces",
-    "test": "npm run test -w backend"
+    "test": "npm run test -w backend",
+    "test:sync:e2e": "node tools/run-sync-e2e.mjs",
+    "release:audit": "node tools/release-audit.mjs",
+    "demo:chat": "node tools/chat-demo.mjs",
+    "test:chat-demo": "node --test tools/chat-demo.acceptance.mjs",
+    "prepare:sync:https": "node tools/https-sync/build-package.mjs",
+    "test:sync:https": "node --test tools/https-sync/acceptance.test.mjs",
+    "activation:checkpoint": "node tools/activation/checkpoint.mjs",
+    "activation:rehearse": "node tools/activation/rehearse.mjs",
+    "test:activation": "node --test tools/activation/activation.test.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

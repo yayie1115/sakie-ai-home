@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createBackup, restoreBackup, verifyBackup } from '../src/database/backup.js';
 import { businessFingerprint, databaseFingerprint } from '../src/database/fingerprint.js';
 import { legacySchema } from '../src/database/legacy-schema.js';
-import { migrate, migrations, schemaVersion } from '../src/database/migrations.js';
+import { migrate, migrations, schemaVersion, latestVersion } from '../src/database/migrations.js';
 import { upgradeDatabase } from '../src/database/upgrade.js';
 import { openDatabase } from '../src/database/index.js';
 import { prepareStorage } from '../src/storage/prepare.js';
@@ -49,12 +49,12 @@ test('v1 upgrade makes verified backup and rehearsal, preserves all business UUI
   const source=fixture(dir);assert.throws(()=>openDatabase(source.filename),/upgrade required/);
   const result=await upgradeDatabase(source.filename,join(dir,'backups'));assert.equal(result.changed,true);assert.ok(result.backupDirectory);assert.ok(result.rehearsalDatabase);await verifyBackup(result.backupDirectory);
   const db=openDatabase(source.filename);try{
-   assert.equal(schemaVersion(db),2);assert.equal(businessFingerprint(db),source.business);
+   assert.equal(schemaVersion(db),latestVersion);assert.equal(businessFingerprint(db),source.business);
    assert.equal(db.prepare('SELECT content FROM memories WHERE id=?').get('11111111-1111-4111-8111-111111111111')?.content,'  原始记忆，保留空白  ');
    assert.equal(db.prepare('SELECT count(*) AS n FROM record_metadata').get()?.n,4);
    assert.equal(db.prepare("SELECT provenance_status FROM record_metadata WHERE record_id='11111111-1111-4111-8111-111111111111'").get()?.provenance_status,'legacy_unverified');
    assert.deepEqual(db.prepare('SELECT payload FROM extra_preserved').get()?.payload,new Uint8Array([0,255,17]));
-   assert.equal(db.prepare('SELECT count(*) AS n FROM schema_migrations').get()?.n,2);
+   assert.equal(db.prepare('SELECT count(*) AS n FROM schema_migrations').get()?.n,latestVersion);
   }finally{db.close();}
   assert.deepEqual(await upgradeDatabase(source.filename,join(dir,'backups')),{changed:false});
   const corrupt=new DatabaseSync(source.filename);corrupt.exec("UPDATE schema_migrations SET checksum='changed' WHERE version=1");corrupt.close();
@@ -77,7 +77,7 @@ test('process termination during an actual migration leaves a recoverable origin
   const source=fixture(dir);
   const script="import {DatabaseSync} from 'node:sqlite';import {migrate} from "+JSON.stringify(new URL('../src/database/migrations.ts',import.meta.url).href)+";const db=new DatabaseSync("+JSON.stringify(source.filename)+");migrate(db,undefined,{afterStep:()=>process.exit(77)});";
   const child=spawnSync(process.execPath,['--import','tsx','--input-type=module','-e',script],{cwd:repositoryRoot,encoding:'utf8',timeout:15000});assert.equal(child.status,77);
-  const db=new DatabaseSync(source.filename);try{assert.equal(databaseFingerprint(db),source.original);assert.equal(schemaVersion(db),1);assert.equal(db.prepare('PRAGMA integrity_check').get()?.integrity_check,'ok');migrate(db);assert.equal(schemaVersion(db),2);assert.equal(businessFingerprint(db),source.business);}finally{db.close();}
+  const db=new DatabaseSync(source.filename);try{assert.equal(databaseFingerprint(db),source.original);assert.equal(schemaVersion(db),1);assert.equal(db.prepare('PRAGMA integrity_check').get()?.integrity_check,'ok');migrate(db);assert.equal(schemaVersion(db),latestVersion);assert.equal(businessFingerprint(db),source.business);}finally{db.close();}
  }finally{rmSync(dir,{recursive:true});}
 });
 test('legacy import uses an independent external copy and never upgrades or overwrites the old file',async()=>{
@@ -85,7 +85,7 @@ test('legacy import uses an independent external copy and never upgrades or over
   const source=fixture(dir);const settings={dataDir:join(dir,'runtime'),databasePath:join(dir,'runtime','sakie.db'),backupDir:join(dir,'backups')};
   await assert.rejects(prepareStorage(settings,{legacyPath:source.filename}),/Legacy database retained/);
   const result=await prepareStorage(settings,{legacyPath:source.filename,importLegacy:true});assert.equal(result.imported,true);
-  const original=new DatabaseSync(source.filename,{readOnly:true});const target=openDatabase(settings.databasePath);try{assert.equal(schemaVersion(original),1);assert.equal(databaseFingerprint(original),source.original);assert.equal(schemaVersion(target),2);assert.equal(businessFingerprint(target),source.business);}finally{original.close();target.close();}
+  const original=new DatabaseSync(source.filename,{readOnly:true});const target=openDatabase(settings.databasePath);try{assert.equal(schemaVersion(original),1);assert.equal(databaseFingerprint(original),source.original);assert.equal(schemaVersion(target),latestVersion);assert.equal(businessFingerprint(target),source.business);}finally{original.close();target.close();}
   assert.deepEqual(await prepareStorage(settings,{legacyPath:source.filename,importLegacy:true}),{created:false,imported:false});
  }finally{rmSync(dir,{recursive:true});}
 });

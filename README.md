@@ -2,7 +2,7 @@
 
 Private AI companion system
 
-长期维护的个人 AI 系统基础工程。前端 React + TypeScript + Vite + React Router，后端 Node.js + TypeScript + Express。使用 npm workspaces 统一安装依赖，前后端独立构建、独立运行。已实现 SQLite 基础数据层和 Memory、Diary、Dream、Activity 的创建、查询、删除 API。未接入 AI，前端仍仅包含基础导航及占位页面。详细模型、API 请求格式和备份说明见 [基础数据层](docs/data-layer.md)。
+长期维护的个人 AI 系统基础工程。前端 React + TypeScript + Vite + React Router，后端 Node.js + TypeScript + Express。使用 npm workspaces 统一安装依赖，前后端独立构建、独立运行。已实现 SQLite 基础数据层和 Memory、Diary、Dream、Activity 的创建、查询、删除 API。第二阶段第一部分已加入 DeepSeek 文本聊天适配器和最简聊天页；真实模型需在后端配置，其他模块仍为基础 API 或占位页面。详细模型、API 请求格式和备份说明见 [基础数据层](docs/data-layer.md)。
 
 ## 目录
 
@@ -43,6 +43,18 @@ sakie-ai-home/
 七个模块在前后端均有独立目录及 README。前端路径为 `/chat`、`/memory`、`/diary`、`/dream`、`/activity`、`/music`、`/device`。后端已注册 `/api/memories`、`/api/diaries`、`/api/dreams`、`/api/activities`。
 
 完整文件列表见 `FILES.txt`。`.github/workflows/ci.yml` 在 push 和 pull request 时执行类型检查、测试、前后端构建以及 Docker 配置检查和镜像构建。此工作流需要推送到 GitHub 后才能运行。
+
+## 正式启用前安全工具
+
+已实现Windows ACL检查/计划/验证工具，以及代理内建test/production隔离、精确白名单和生产人工确认。真实权限和v3库未改；见 [安全方案](docs/sync-security.md)。
+
+## 第二阶段增量归档
+
+已实现独立设备认证、Windows出站增量拉取、本地事务游标及持久ACK，清理保持关闭。详见 [实施、风险与隔离验收步骤](docs/incremental-sync.md)。本轮未升级真实v3库；新代码需v4，真实启用须另行备份/迁移授权。
+
+## 第二阶段文本聊天
+
+本轮基于第一阶段提交 2cf90cc，新增 v3 数据库迁移、可靠消息入库和 DeepSeek 适配器。配置、API、迁移步骤、测试及限制见 [文本聊天说明](docs/phase2-text-chat.md)。已有 v2 数据库不会自动升级，启动前必须按说明在停写状态完成备份及迁移。
 
 ## 本地运行
 
@@ -129,3 +141,22 @@ docker compose down          # 停止服务
 - [架构审查基线](docs/architecture-review.md)
 
 当前没有接入真实模型或实现双端同步。
+
+第二阶段同步的编译产物端到端验收：在项目根运行 `npm run test:sync:e2e`。命令先构建 backend/local-agent，再启动独立后端与代理 CLI，以假模型、回环白名单和全新 E 盘合成库验证断网、进程中断、ACK/游标恢复及撤销。不会读取 backend/.env 或调用真实模型；不代表正式双端已启用。
+
+完整源码公开前运行 `npm run release:audit`：只在 `.phase1-work` 生成候选文件/哈希与文档待审清单，不暂存、不提交或推送。机器审计文档默认不进入源码候选；公开仓库需要用户另行明确授权。
+
+生产交付另有独立 `compose.release.json`（不要与旧 compose.yaml 合并使用）：必须私下配置 `PUBLIC_ORIGIN`、`BACKEND_ENV_FILE`、`OWNER_CREDENTIAL_FILE_HOST`、`SAKIE_DATA_VOLUME`、`SAKIE_BACKUP_VOLUME`。卷必须预先存在并核验数据来源/运行账户权限，模板不创建或迁移真实数据；身份只读挂载，网页仅回环8080。授权后的隔离Docker验收需先运行 `docker compose -f compose.release.json config --quiet`，再验证镜像、挂载、Nginx与HTTPS；本地JSON策略检查不代替容器验收。当前仍需另行批准正式启用。
+
+### 本机合成聊天演示（不使用真实模型或运行库）
+
+运行 `npm run demo:chat`，打开 `http://127.0.0.1:5180/demo/chat`，使用演示密码 `demo-only-sakie` 登录。
+仅绑定回环地址；假模型注入仅存在于独立工具，不改变生产模型配置。首次运行在项目外创建全新 `sakie-ai-home-data/chat-demo-*` 合成库；不要在此演示输入私人信息。
+刷新会保留已入库历史。停止后运行 `npm run demo:chat -- --resume chat-demo-实际运行名` 可重新打开同一演示库；仅接受工具创建并带合成标记的直接子目录。启动输出包含运行名；Ctrl+C 停止，不删除数据。
+`npm run test:chat-demo` 使用已构建的前后端及本机 Edge，在新建合成目录验证登录、单时间线、假模型回复、刷新、服务重启及消息/outbox 持久性；先运行前后端 build。测试不静默跳过缺失浏览器。
+原 `/chat` 会话界面继续保留，单时间线位于 `/demo/chat`；该路由复用正常认证与 API，本身不会将生产模型切换成假模型。只有本工具创建的本机服务使用假模型。
+
+### 第二阶段正式启用准备（尚未安装）
+
+`npm run activation:checkpoint` 创建无远程的独立本地 Git 检查点及可实际克隆恢复的 bundle，不改变当前仓库索引/分支，也不会上传源码。`npm run activation:rehearse` 仅操作已登记的冻结历史副本及新隔离候选，不打开当前正式主数据库。`npm run test:activation` 运行新增运行配置/锁/恢复激活门槛测试。
+运行配置、普通用户登录后任务、配对/撤销及精确授权范围见 tools/activation/RUNBOOK.md；没有安装服务、注册任务或启用真实数据。UI 继续遵循产品规范 v1.1，已否决 HTML 样稿不使用。
