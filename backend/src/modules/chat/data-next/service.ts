@@ -12,6 +12,7 @@ type Job = {
     snapshot: string;
     status: string;
     result_hash: string | null;
+    error_code: string | null;
 };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const fail = (code: string, status = 409): never => { throw new ChatError(status, code); };
@@ -35,10 +36,10 @@ export class BubbleService {
         if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='chat_bubbles'").get())
             throw Error('CANDIDATE_MIGRATION_REQUIRED');
     }
-    private authorize(c: string, write = false) { const a = this.access(c); if (!a.read || write && !a.write || !a.audience)
+    protected authorize(c: string, write = false) { const a = this.access(c); if (!a.read || write && !a.write || !a.audience)
         fail('CONVERSATION_DENIED', 403); return a; }
-    private event(kind: string, payload: unknown) { const raw = JSON.stringify(payload); this.db.prepare('INSERT INTO chat_bubble_outbox(event_id,kind,payload,payload_hash) VALUES (?,?,?,?)').run(randomUUID(), kind, raw, hashContent(raw)); }
-    private operation<T>(requestId: string, input: unknown, action: () => T): T {
+    protected event(kind: string, payload: unknown) { const raw = JSON.stringify(payload); this.db.prepare('INSERT INTO chat_bubble_outbox(event_id,kind,payload,payload_hash) VALUES (?,?,?,?)').run(randomUUID(), kind, raw, hashContent(raw)); }
+    protected operation<T>(requestId: string, input: unknown, action: () => T): T {
         id(requestId);
         const digest = hashContent(JSON.stringify(input));
         return this.legacy.transaction(() => {
@@ -172,13 +173,15 @@ export class BubbleService {
         this.authorize(before.conversationId, true);
         return this.operation(requestId, { kind: 'delete', bubbleId, expected }, () => { const b = this.mutable(bubbleId, expected); this.db.prepare('UPDATE chat_bubbles SET deleted=1,revision=revision+1 WHERE id=?').run(b.id); this.event('bubble.deleted', this.get(b.id)); return { deleted: true }; });
     }
-    prepareRegeneration(requestId: string, turnId: string, bubbleId?: string) {
+    prepareRegeneration(requestId: string, turnId: string, bubbleId?: string, expected?: {bubbleId:string;revision:number}) {
         const turn = this.legacy.turn(turnId);
         this.authorize(turn.conversationId, true);
         id(requestId);
-        return this.operation(requestId, { kind: 'regeneration', turnId, bubbleId: bubbleId ?? null }, () => {
+        return this.operation(requestId, { kind: 'regeneration', turnId, bubbleId: bubbleId ?? null, ...(expected?{expected}:{}) }, () => {
+            if(expected){const selected=this.get(expected.bubbleId);if(selected.turnId!==turnId||selected.role!=='assistant'||selected.deleted||selected.revision!==expected.revision)fail('REVISION_CONFLICT');}
             if (turn.status !== 'succeeded')
                 fail('TURN_NOT_COMPLETE');
+            if(this.db.prepare("SELECT 1 FROM chat_bubble_jobs WHERE turn_id=? AND status IN ('queued','running','unknown')").get(turnId))fail('GENERATION_BUSY');
             const all = this.current(turn.conversationId).filter(b => b.turnId === turnId && b.role === 'assistant');
             const targets = bubbleId ? all.filter(b => b.id === bubbleId) : all;
             if (!targets.length)
@@ -188,8 +191,8 @@ export class BubbleService {
             return { jobId: requestId };
         });
     }
-    private job(jobId: string): Job { const j = this.db.prepare('SELECT * FROM chat_bubble_jobs WHERE id=?').get(jobId) as unknown as Job | undefined; if (!j)
-        fail('JOB_NOT_FOUND', 404); this.authorize(this.legacy.turn(j!.turn_id).conversationId, true); return j!; }
+    protected job(jobId: string, write = true): Job { const j = this.db.prepare('SELECT * FROM chat_bubble_jobs WHERE id=?').get(jobId) as unknown as Job | undefined; if (!j)
+        fail('JOB_NOT_FOUND', 404); this.authorize(this.legacy.turn(j!.turn_id).conversationId, write); return j!; }
     start(jobId: string) { return this.legacy.transaction(() => { const j = this.job(jobId); if (j.status !== 'queued')
         fail('JOB_NOT_QUEUED'); this.db.prepare("UPDATE chat_bubble_jobs SET status='running' WHERE id=?").run(jobId); if (j.kind === 'reply')
         this.db.prepare("UPDATE chat_turns SET status='running' WHERE id=?").run(j.turn_id); }); }

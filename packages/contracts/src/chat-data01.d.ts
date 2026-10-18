@@ -49,3 +49,9 @@ export interface BubbleAccess {
     write: boolean;
     audience: string;
 }
+
+export type BubbleOperation = {requestId:string;expectedRevision:number} & (
+ {kind:'edit';content:string}|{kind:'switch';versionId:string}|{kind:'delete'}|{kind:'regenerate'|'regenerate-turn'});
+export interface GenerationView {id:string;turnId:string;kind:'reply'|'regeneration';status:'queued'|'running'|'succeeded'|'failed'|'unknown'|'cancelled';errorCode:string|null;attempt:number;partials:{attempt:number;outputs:{bubbleId:string;text:string}[]}[];evidenceAvailable:boolean;}
+export type PublicBubble = Omit<CurrentBubble,'quote'> & {quote?: (BubbleQuote & {available:true})|{bubbleId:string;available:false}};
+export interface OpsHistory {conversationId:string;items:PublicBubble[];jobs:GenerationView[];}

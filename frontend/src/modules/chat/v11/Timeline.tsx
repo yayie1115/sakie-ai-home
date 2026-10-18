@@ -4,13 +4,13 @@ import { useLongPress } from './useLongPress';
 
 type Props={room:Room;messages:Message[];composer:Composer;onCompose:(patch:Partial<Composer>)=>void;
  onStage:()=>void;onSubmit:()=>void;onMessages:(messages:Message[])=>void;onPending:(messages:Message[])=>void;
- onBack:()=>void;onDetails:()=>void;notice:(message:string)=>void;jumpId?:string;onJumped:()=>void;locked?:boolean;linked?:boolean};
+ onBack:()=>void;onDetails:()=>void;notice:(message:string)=>void;jumpId?:string;onJumped:()=>void;locked?:boolean;linked?:boolean;onOperate?:(m:Message,action:string,value?:string)=>Promise<void>;onRead?:(m:Message)=>Promise<string>};
 function Bubble({m,room,selected,onOpen,onQuoteJump,children}:{m:Message;room:Room;selected:boolean;onOpen:()=>void;onQuoteJump:(id:string)=>void;children:React.ReactNode}){
  const press=useLongPress(onOpen);
  return <article className={`v11-message ${m.author==='me'?'mine':''} ${selected?'chosen':''}`} data-message-id={m.id}>
    <span className="v11-avatar" aria-hidden="true">{titleOf(room,m.author).slice(-1)}</span>
    <div className="v11-message-body">{room.kind==='group'&&m.author!=='me'&&<span className="v11-speaker">{titleOf(room,m.author)}</span>}
-     {m.quote&&<button className="v11-quoted" onClick={()=>onQuoteJump(m.quote!.id)}>{m.quote.author}：{m.quote.text}</button>}
+     {m.quote&&<button className="v11-quoted" disabled={m.quote.unavailable} onClick={()=>onQuoteJump(m.quote!.id)}>{m.quote.author}：{m.quote.text}</button>}
      <div className={`v11-bubble ${m.pending?'pending':''}`} {...press} tabIndex={0} onKeyDown={e=>{if(e.key==='F10'&&e.shiftKey){e.preventDefault();onOpen();}}}>{textOf(m)}</div>
      {children}
    </div>
@@ -29,10 +29,19 @@ export function Timeline(props:Props){
  function open(m:Message){oldScroll.current=scroll.current?.scrollTop??null;const selection=window.getSelection()?.toString().trim()??'';setPartialQuote(textOf(m).includes(selection)?selection:'');setMenu(m.id);setEdit(null);}
  function update(id:string,change:(m:Message)=>Message){if(composer.pending.some(m=>m.id===id))props.onPending(composer.pending.map(m=>m.id===id?change(m):m));else props.onMessages(messages.map(m=>m.id===id?change(m):m));}
  function action(m:Message,name:string){
-   if(props.locked&&m.pending){props.notice('提交结果尚未确认，不能改动原快照');return;}
-   if(props.linked&&!m.pending&&!['copy','quote'].includes(name)){props.notice('正式消息编辑、删除和版本接口尚未接入');return;}
-   if(name==='copy'){if(navigator.clipboard)navigator.clipboard.writeText(textOf(m)).then(()=>props.notice('已复制'),()=>props.notice('浏览器不允许复制，请选中文字复制'));else props.notice('浏览器不支持剪贴板，请选中文字复制');close();}
-   if(name==='quote'){onCompose({quote:{id:m.id,author:titleOf(room,m.author),text:partialQuote||textOf(m),...(m.sourceRef?{source:{conversationId:room.id,...m.sourceRef,bubbleId:m.id}}:{})}});close();}
+   if(props.locked&&(m.pending||props.onOperate)){props.notice('提交结果尚未确认，不能改动原快照');return;}
+   if(props.linked&&!m.pending&&!props.onOperate&&!['copy','quote'].includes(name)){props.notice('正式消息编辑、删除和版本接口尚未接入');return;}
+   if(props.linked&&props.onOperate&&m.pending&&name==='quote'){props.notice('待提交气泡尚无可核验的服务端来源，请先提交');return;}
+   if(name==='copy'||name==='quote'){
+     const selected=partialQuote;void (async()=>{const current=props.onRead&&!m.pending?await props.onRead(m):textOf(m);
+      if(name==='copy'){if(navigator.clipboard)await navigator.clipboard.writeText(current);else throw Error('浏览器不支持剪贴板，请选中文字复制');props.notice('已复制');}
+      else onCompose({quote:{id:m.id,author:titleOf(room,m.author),text:selected&&current.includes(selected)?selected:current,...(m.sourceRef?{source:{conversationId:room.id,...m.sourceRef,bubbleId:m.id}}:{})}});
+      close();})().catch(e=>props.notice((e as Error).message));return;
+   }
+   if(props.linked&&props.onOperate&&!m.pending){
+    if(name==='edit'){setEdit({id:m.id,text:textOf(m)});return;}
+    void props.onOperate(m,name).then(close).catch(e=>props.notice((e as Error).message));return;
+   }
    if(name==='delete'){if(m.pending)props.onPending(composer.pending.filter(x=>x.id!==m.id));else props.onMessages(messages.filter(x=>x.id!==m.id));close();}
    if(name==='edit')setEdit({id:m.id,text:textOf(m)});
    if(name==='prev'||name==='next'){update(m.id,x=>({...x,version:Math.max(0,Math.min(x.versions.length-1,x.version+(name==='next'?1:-1)))}));}
@@ -49,11 +58,12 @@ export function Timeline(props:Props){
    <div ref={scroll} className={`v11-timeline ${menu?'selecting':''}`} aria-label="聊天时间线" onScroll={e=>onCompose({scroll:e.currentTarget.scrollTop})} onClick={e=>{if(menu&&!(e.target as HTMLElement).closest('.chosen'))close();}}>
      {messages.length>count&&<button className="v11-text-button" onClick={()=>{const el=scroll.current;const before=el?.scrollHeight??0;setCount(n=>n+30);requestAnimationFrame(()=>{if(el)el.scrollTop+=el.scrollHeight-before;});}}>加载更早消息</button>}
      <p className="v11-date">合成数据 · 不连接真实聊天</p>
-     {all.slice(Math.max(0,messages.length-count)).map((m,i,array)=><Bubble key={m.id} m={m} room={room} selected={menu===m.id} onOpen={()=>open(m)} onQuoteJump={id=>{if(!messages.some(x=>x.id===id)){props.notice('原消息已从演示会话移除');return;}setCount(messages.length);requestAnimationFrame(()=>scroll.current?.querySelector(`[data-message-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'center'}));}}>
+     {all.slice(Math.max(0,messages.length-count)).map((m,i,array)=><Bubble key={m.id} m={m} room={room} selected={menu===m.id} onOpen={()=>open(m)} onQuoteJump={id=>{if(!messages.some(x=>x.id===id)){props.notice('原消息已从演示会话移除');return;}const target=messages.find(x=>x.id===id)!;void (async()=>{if(props.onRead)await props.onRead(target);setCount(messages.length);requestAnimationFrame(()=>scroll.current?.querySelector(`[data-message-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'center'}));})().catch(e=>props.notice((e as Error).message));}}>
        {menu===m.id&&<div className="v11-bubblebar" aria-label="消息操作">
-         {edit?.id===m.id?<><textarea aria-label="编辑消息" value={edit.text} onChange={e=>setEdit({...edit,text:e.target.value})}/><button disabled={!edit.text.trim()} onClick={()=>{const value=edit.text.trim();update(m.id,x=>({...x,versions:[...x.versions,value],version:x.versions.length}));close();}}>保存</button><button onClick={close}>取消</button></>:<>
+         {edit?.id===m.id?<><textarea aria-label="编辑消息" value={edit.text} onChange={e=>setEdit({...edit,text:e.target.value})}/><button disabled={!edit.text.trim()} onClick={()=>{const value=props.onOperate?edit.text:edit.text.trim();if(props.linked&&props.onOperate&&!m.pending){void props.onOperate(m,'edit',value).then(close).catch(e=>props.notice((e as Error).message));return;}update(m.id,x=>({...x,versions:[...x.versions,value],version:x.versions.length}));close();}}>保存</button><button onClick={close}>取消</button></>:<>
            {(['copy','edit','delete','quote'] as const).map((a,i)=><button key={a} onClick={()=>action(m,a)}>{['复制','编辑','删除','引用'][i]}</button>)}
-           {m.author!=='me'&&!props.linked&&<><button onClick={()=>action(m,'regenerate')}>模拟单泡重生成</button><button onClick={()=>action(m,'regenerateTurn')}>模拟整回合重生成</button><button disabled={m.version===0} onClick={()=>action(m,'prev')}>上一版本</button><button disabled={m.version===m.versions.length-1} onClick={()=>action(m,'next')}>下一版本</button></>}
+           {m.author!=='me'&&(!props.linked||props.onOperate)&&<><button onClick={()=>action(m,'regenerate')}>{props.onOperate?'单泡重生成':'模拟单泡重生成'}</button><button onClick={()=>action(m,'regenerateTurn')}>{props.onOperate?'整回合重生成':'模拟整回合重生成'}</button><button disabled={m.version===0} onClick={()=>action(m,'prev')}>上一版本</button><button disabled={m.version===m.versions.length-1} onClick={()=>action(m,'next')}>下一版本</button></>}
+           {props.onOperate&&m.author==='me'&&!m.pending&&m.versions.length>1&&<><button disabled={m.version===0} onClick={()=>action(m,'prev')}>上一版本</button><button disabled={m.version===m.versions.length-1} onClick={()=>action(m,'next')}>下一版本</button></>}
            {m.pending&&<><button disabled={composer.pending[0].id===m.id} onClick={()=>action(m,'up')}>上移</button><button disabled={composer.pending.at(-1)?.id===m.id} onClick={()=>action(m,'down')}>下移</button></>}
            <button onClick={close}>关闭</button>
          </>}

@@ -1,6 +1,6 @@
 /** Synthetic-only state for the approved v11 frontend. No API or real chat storage. */
-export type Quote = { id: string; author: string; text: string; source?: { conversationId: string; messageId: string; revision: number; bubbleId?: string } };
-export type Message = { id: string; turnId: string; author: string; versions: string[]; version: number; time: number; quote?: Quote; pending?: boolean; sourceRef?: {messageId:string;revision:number} };
+export type Quote = { unavailable?:boolean; id: string; author: string; text: string; source?: { conversationId: string; messageId: string; revision: number; bubbleId?: string } };
+export type Message = { versionIds?:string[]; id: string; turnId: string; author: string; versions: string[]; version: number; time: number; quote?: Quote; pending?: boolean; sourceRef?: {messageId:string;revision:number} };
 export type Room = { id: string; kind: 'private' | 'group'; name: string; members: string[]; remarks: Record<string,string>; activity: number; pinned: boolean; deletedAt?: number; rules: { mixed: boolean; mentions: boolean; limited: boolean } };
 export type Composer = { draft: string; quote?: Quote; pending: Message[]; scroll: number };
 export type Workspace = { schema: 1; rooms: Room[]; messages: Record<string,Message[]>; composers: Record<string,Composer> };
