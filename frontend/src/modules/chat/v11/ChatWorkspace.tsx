@@ -1,17 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { compose, createRoom, changeRoom, emptyComposer, initialWorkspace, roles, restoreRoom, searchMessages, sortedRooms, stage, submit, textOf, titleOf, type Room, type Workspace } from './state';
 import { Timeline } from './Timeline';
-import { useLongPress } from './useLongPress';
+import {ConversationRow} from './ConversationRow';
 import '../group-chat-preview.css';
 const SESSION_KEY='sakie:v11:synthetic-workspace:1';
 function load():Workspace {try{const raw=sessionStorage.getItem(SESSION_KEY);if(raw){const s=JSON.parse(raw);if(s.schema===1&&Array.isArray(s.rooms)&&s.messages&&s.composers)return s;}}catch{/* Unavailable browser storage must not prevent the UI. */}return initialWorkspace();}
-function ConversationRow({room,active,preview,onSelect,onMenu}:{room:Room;active:boolean;preview:string;onSelect:()=>void;onMenu:()=>void}){
- const press=useLongPress(onMenu);
- return <button className={`v11-conversation ${active?'active':''}`} onClick={onSelect} {...press} aria-label={`打开${room.name}`} aria-current={active?'page':undefined}>
-   <span className={`v11-avatar ${room.kind==='group'?'group':''}`}>{room.kind==='group'?'群':room.name.slice(-1)}</span>
-   <span className="v11-conversation-copy"><span><strong>{room.name}</strong><time>{new Date(room.activity).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}</time></span><small>{room.pinned?'置顶 · ':''}{preview||'尚无消息'}</small></span>
- </button>;
-}
 function Highlight({text,query}:{text:string;query:string}) {const index=query?text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()):-1;return index<0?<>{text}</>:<>{text.slice(0,index)}<mark>{text.slice(index,index+query.length)}</mark>{text.slice(index+query.length)}</>;}
 export function ChatWorkspace(){
  const workspace=useRef<HTMLElement>(null);
