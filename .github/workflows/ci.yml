@@ -15,7 +15,22 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - name: Test with isolated runtime storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_root="$(mktemp -d "$RUNNER_TEMP/sakie-ci-XXXXXX")"
+          mkdir -p "$test_root/cases" "$test_root/runtime" "$test_root/backups" "$test_root/identity"
+          NODE_ENV=test \
+          TEST_DATA_ROOT="$test_root/cases" \
+          DOTENV_CONFIG_PATH="$test_root/no-dotenv.env" \
+          DATA_DIR="$test_root/runtime" \
+          DATABASE_PATH="$test_root/runtime/synthetic.db" \
+          BACKUP_DIR="$test_root/backups" \
+          OWNER_CREDENTIAL_FILE="$test_root/identity/owner.json" \
+          DEEPSEEK_API_KEY='' \
+          DEEPSEEK_MODEL='' \
+          npm test
       - run: npm run build
       - run: docker compose config --quiet
       - run: docker compose build
