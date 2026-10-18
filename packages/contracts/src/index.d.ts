@@ -55,3 +55,5 @@ export interface ChatRevisionPayload { id: string; conversationId: string; revis
 
 /** Experimental v11 batch contracts; existing v3/v4 wire types remain unchanged. */
 export type { V11QuoteTarget, V11PendingBubble, V11Submission, V11SubmissionReceipt, V11HistoryBubble, V11History } from './chat-v11.js';
+
+export type * from './chat-data01.js';

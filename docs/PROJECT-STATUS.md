@@ -278,3 +278,10 @@
 - 用户确认F BitLocker100%但保护关闭/无保护器，暂不更改且不依赖微软登录；改用标准age密码认证加密。F只存密文，E私有临时区/恢复目标；尚未创建F真实目录或处理真实数据。
 - tools/backup复用现有一致性backup/verify/restore，隐藏TTY密码、不接受秘密argv/env/普通文件/管道，随机盐/nonce、认证后恢复、排他目标与中断pending/owned清理。新24/24、四工作区typecheck/生产build通过，官方npm audit0；不重跑132项/首尔验收。
 - [加密备份交付与精确授权清单](reviews/2026-10-17-phase2-encrypted-backup-acceptance.md)、[操作说明](../tools/backup/README.md)；RUNBOOK已撤回旧F明文复制/恢复方案。强杀/断电可能留下E明文，不能声称安全擦除/零明文；真实使用前须审阅并接受该边界或另行批准加密临时存储。未改正式ACL、BitLocker、真实库/凭据、云端或DNS，不自行进入正式备份。
+
+
+## 2026-10-18｜CHAT-DATA-01 隔离候选交付
+
+基线 `2376302`。当前主线继续 Chat v11；本轮追加同库规范化气泡、不可丢弃版本历史、来源修订、幂等操作及可恢复任务候选，并复用 v11 Timeline 做合成联调。正式 `/chat`、v4 迁移清单及同步 Agent 未改；MEM-04 未重做。
+
+详细文件清单、实际测试和生产边界见 [CHAT-DATA-01 验收报告](reviews/2026-10-18-chat-data01.md)。新气泡未接正式归档/ACK，始终禁止清理；正式群权限、版本操作 UI/API 和记忆索引联动仍待后续。合成库不允许混用旧奇偶消息写入器，不能直接用于生产。
