@@ -11,7 +11,7 @@ function Bubble({m,room,selected,onOpen,onQuoteJump,children}:{m:Message;room:Ro
    <span className="v11-avatar" aria-hidden="true">{titleOf(room,m.author).slice(-1)}</span>
    <div className="v11-message-body">{room.kind==='group'&&m.author!=='me'&&<span className="v11-speaker">{titleOf(room,m.author)}</span>}
      {m.quote&&<button className="v11-quoted" disabled={m.quote.unavailable} onClick={()=>onQuoteJump(m.quote!.id)}>{m.quote.author}：{m.quote.text}</button>}
-     <div className={`v11-bubble ${m.pending?'pending':''}`} {...press} tabIndex={0} onKeyDown={e=>{if(e.key==='F10'&&e.shiftKey){e.preventDefault();onOpen();}}}>{textOf(m)}</div>
+     <div className={`v11-bubble ${m.pending||m.delivery?'pending':''}`} {...press} tabIndex={0} onKeyDown={e=>{if(e.key==='F10'&&e.shiftKey){e.preventDefault();onOpen();}}}>{textOf(m)}</div>
      {children}
    </div>
  </article>;
@@ -26,12 +26,12 @@ export function Timeline(props:Props){
  useEffect(()=>{const el=scroll.current;if(!el)return;el.scrollTop=props.m0?.initialLatest?el.scrollHeight:composer.scroll;
   if(!props.m0)return;const observer=new ResizeObserver(()=>{if(pinned.current)el.scrollTop=el.scrollHeight;});observer.observe(el);return()=>observer.disconnect();},[]);
  useEffect(()=>{if(props.m0&&input.current){input.current.style.height='auto';input.current.style.height=Math.min(input.current.scrollHeight,120)+'px';}},[readOnly,composer.draft]);
- useLayoutEffect(()=>{if(props.live&&pinned.current&&scroll.current)scroll.current.scrollTop=scroll.current.scrollHeight;},[messages.length,props.live?.status]);
+ useLayoutEffect(()=>{if(props.live&&pinned.current&&scroll.current)scroll.current.scrollTop=scroll.current.scrollHeight;},[messages.length,messages.at(-1)?.versions[0],props.live?.status]);
  useLayoutEffect(()=>{const el=scroll.current,anchor=earlierAnchor.current;if(!el||!anchor)return;const node=el.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchor.id)}"]`);if(node){el.scrollTop+=node.getBoundingClientRect().top-el.getBoundingClientRect().top-anchor.offset;earlierAnchor.current=null;}},[messages[0]?.id,messages.length]);
  async function earlier(){const el=scroll.current;if(!el||!props.m0||props.m0.loadingEarlier)return;const bounds=el.getBoundingClientRect(),node=[...el.querySelectorAll<HTMLElement>('[data-message-id]')].find(n=>n.getBoundingClientRect().bottom>bounds.top+1);if(node)earlierAnchor.current={id:node.dataset.messageId!,offset:node.getBoundingClientRect().top-bounds.top};pinned.current=false;await props.m0.loadEarlier();}
  useEffect(()=>{if(!menu)return;const frame=requestAnimationFrame(()=>{const timeline=scroll.current;const bar=timeline?.querySelector('.v11-bubblebar');if(timeline&&bar){const excess=bar.getBoundingClientRect().bottom-timeline.getBoundingClientRect().bottom+12;if(excess>0)timeline.scrollTop+=excess;}});return()=>cancelAnimationFrame(frame);},[menu,edit]);
  useEffect(()=>{if(!props.jumpId)return;setCount(messages.length);const id=props.jumpId;const frame=requestAnimationFrame(()=>{scroll.current?.querySelector(`[data-message-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'center'});props.onJumped();});return()=>cancelAnimationFrame(frame);},[props.jumpId,messages.length]);
- function open(m:Message){oldScroll.current=scroll.current?.scrollTop??null;const selection=window.getSelection()?.toString().trim()??'';setPartialQuote(textOf(m).includes(selection)?selection:'');setMenu(m.id);setEdit(null);}
+ function open(m:Message){if(m.delivery)return;oldScroll.current=scroll.current?.scrollTop??null;const selection=window.getSelection()?.toString().trim()??'';setPartialQuote(textOf(m).includes(selection)?selection:'');setMenu(m.id);setEdit(null);}
  function update(id:string,change:(m:Message)=>Message){if(composer.pending.some(m=>m.id===id))props.onPending(composer.pending.map(m=>m.id===id?change(m):m));else props.onMessages(messages.map(m=>m.id===id?change(m):m));}
  function action(m:Message,name:string){
    if((readOnly||props.live)&&name!=='copy'){props.notice('此操作尚未接通，M0-2不会修改消息或调用模型');return;}
@@ -75,7 +75,7 @@ export function Timeline(props:Props){
            <button onClick={close}>关闭</button>
          </>}
        </div>}
-       {m.pending?<small className="v11-pending-label">待提交</small>:array[i+1]?.turnId!==m.turnId&&<small className="v11-meta">{new Date(m.time).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}{m.author!=='me'&&!readOnly?' · Token / 缓存统计未提供':''}</small>}
+       {m.delivery?<small className="v11-pending-label">{m.delivery==='sending'?'正在发送 · 尚未确认保存':'正在生成 · 尚未保存'}</small>:m.pending?<small className="v11-pending-label">待提交</small>:array[i+1]?.turnId!==m.turnId&&<small className="v11-meta">{new Date(m.time).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}{m.author!=='me'&&!readOnly?' · Token / 缓存统计未提供':''}</small>}
        {m.versions.length>1&&<small className="v11-meta">版本 {m.version+1}/{m.versions.length}</small>}
      </Bubble>)}
      {!all.length&&<p className="v11-empty">{readOnly?'此测试会话暂无已保存消息':'还没有消息，发出第一句问候吧。'}</p>}

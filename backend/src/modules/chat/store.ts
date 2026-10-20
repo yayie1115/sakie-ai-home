@@ -56,6 +56,9 @@ export class ChatStore implements CloudMessageStore {
       return {messageId,turnId,turnSeq:seq,durable:true};
     });
   }
+  message(id: string): ChatMessage | null {
+    return this.db.prepare('SELECT m.id,m.turn_id AS turnId,m.message_seq AS messageSeq,m.role,COALESCE(s.content,m.content) AS content,m.created_at AS createdAt,COALESCE(s.revision,1) AS revision FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id WHERE m.id=? AND s.deleted_at IS NULL').get(id) as unknown as ChatMessage | undefined ?? null;
+  }
   receipt(turn: ChatTurn): DurableMessageReceipt {
     const message = this.db.prepare("SELECT id FROM chat_messages WHERE turn_id=? AND role='user'").get(turn.id)!;
     return {messageId:String(message.id),turnId:turn.id,turnSeq:turn.turnSeq,durable:true};

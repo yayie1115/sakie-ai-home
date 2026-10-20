@@ -24,9 +24,10 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
     const [composers, setComposers] = useState<Record<string, Composer>>({}), [scrolled, setScrolled] = useState<Record<string, boolean>>({});
     const [settings, setSettings] = useState<{configured:boolean;maxMessageChars:number;model?:string}>({configured:false,maxMessageChars:12000});
     const [turns,setTurns] = useState<Record<string,ChatTurn|null>>({});
+    const [progress,setProgress]=useState<Record<string,string>>({});
     const [writeBusy,setWriteBusy] = useState(false);
     const sending = useRef(false), pendingCreate = useRef<string|null>(null);
-    const pending = useRef(new Map<string,{clientMessageId:string;content:string}>());
+    const pending = useRef(new Map<string,{clientMessageId:string;content:string;time:number}>());
     const retries = useRef(new Map<string,string>());
     const cache = useRef(new Map<string, {
         items: ChatMessage[];
@@ -37,11 +38,14 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
     const listScroll = useRef<HTMLDivElement>(null), listTop = useRef(0), navigation = useRef<HTMLButtonElement>(null);
     function restoreNavigationFocus() { requestAnimationFrame(() => { const button = selected ? document.querySelector<HTMLButtonElement>('.v11-chat-head [aria-label="打开主导航"]') : navigation.current; button?.focus(); }); }
     const loadRooms = useCallback(async (beforeCursor?: number) => { setListLoading(true); setListError(''); try {
-        const config = await api<{configured:boolean;maxMessageChars:number;model?:string}>(base + '/config');
-        if (!live && config.configured !== false)
-            throw Error('M0 model boundary mismatch');
+        type Settings={configured:boolean;maxMessageChars:number;model?:string};
+        const path=base+'/conversations?limit=50'+(beforeCursor?'&before='+beforeCursor:'');
+        const [config,page] = live ? await Promise.all([api<Settings>(base+'/config'),api<ChatConversationPage>(path)]) : await (async()=>{
+            const config=await api<Settings>(base+'/config');
+            if(config.configured!==false)throw Error('M0 model boundary mismatch');
+            return [config,await api<ChatConversationPage>(path)] as const;
+        })();
         setSettings(config);
-        const page = await api<ChatConversationPage>(base + '/conversations?limit=50' + (beforeCursor ? '&before=' + beforeCursor : ''));
         setRooms(old => beforeCursor ? [...old, ...page.items.filter(c => !old.some(r => r.id === c.id))] : page.items);
         setNext(page.nextBefore);
     }
@@ -59,6 +63,7 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
         setBefore(null);
         setHistoryError('');
         setHistoryBusy(false);
+        if(selected)setProgress(old=>({...old,[selected]:''}));
         if (!selected)
             return;
         if (!uuid.test(selected)) {
@@ -128,12 +133,16 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
         if(!live||!selected||!turn||!['queued','running'].includes(turn.status))return;
         const id=selected,turnId=turn.id;let active=true,timer:ReturnType<typeof setTimeout>;
         const poll=async()=>{try{
-            const result=await api<{turn:ChatTurn;messages:ChatMessage[]}>(base+'/turns/'+turnId);
+            const result=await api<{turn:ChatTurn;messages:ChatMessage[];progress?:{content:string}|null}>(base+'/turns/'+turnId);
             if(!active)return;
             setTurns(old=>({...old,[id]:result.turn}));
-            setMessages(old=>[...new Map([...old,...result.messages].map(m=>[m.id,m])).values()].sort((a,b)=>a.messageSeq-b.messageSeq));
-            if(['queued','running'].includes(result.turn.status))timer=setTimeout(poll,1200);
-        }catch(e){if(active){setNotice(describe(e));timer=setTimeout(poll,3000);}}};
+            setProgress(old=>({...old,[id]:result.turn.status==='running'?result.progress?.content??'':''}));
+            setMessages(old=>{
+                const rows=[...new Map([...old,...result.messages].map(m=>[m.id,m])).values()].sort((a,b)=>a.messageSeq-b.messageSeq);
+                return rows.length===old.length&&rows.every((m,i)=>m.id===old[i].id&&m.content===old[i].content&&m.revision===old[i].revision)?old:rows;
+            });
+            if(['queued','running'].includes(result.turn.status))timer=setTimeout(poll,500);
+        }catch(e){if(active){setNotice(describe(e));if(e instanceof ApiError&&[401,403].includes(e.status)){setProgress(old=>({...old,[id]:''}));setMessages([]);setLoadedFor(null);return;}timer=setTimeout(poll,3000);}}};
         timer=setTimeout(poll,500);return()=>{active=false;clearTimeout(timer);};
     },[api,live,selected,turn?.id,turn?.status]);
     useEffect(()=>{if(!live)return;const warn=(event:BeforeUnloadEvent)=>{if(pending.current.size||Object.values(composers).some(c=>c.draft)){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[live,composers]);
@@ -147,12 +156,16 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
     async function send(){
         if(!live||!selected||loadedFor!==selected||sending.current||!settings.configured)return;
         const id=selected;let request=pending.current.get(id);
-        if(!request){if(unresolved||!composer.draft.trim())return;request={clientMessageId:crypto.randomUUID(),content:composer.draft};pending.current.set(id,request);}
+        if(!request){if(unresolved||!composer.draft.trim())return;request={clientMessageId:crypto.randomUUID(),content:composer.draft,time:Date.now()};pending.current.set(id,request);}
         sending.current=true;setWriteBusy(true);
         try{
-            const receipt=await api<DurableMessageReceipt&{turn:ChatTurn}>(base+'/conversations/'+id+'/messages',{method:'POST',body:JSON.stringify(request)});
+            const receipt=await api<DurableMessageReceipt&{turn:ChatTurn;message?:ChatMessage|null}>(base+'/conversations/'+id+'/messages',{method:'POST',body:JSON.stringify({clientMessageId:request.clientMessageId,content:request.content})});
             pending.current.delete(id);setComposers(old=>({...old,[id]:{...(old[id]??emptyComposer()),draft:''}}));setTurns(old=>({...old,[id]:receipt.turn}));
-            if(selectedRef.current===id)await historyPage();
+            if(selectedRef.current===id){
+                if(receipt.message&&receipt.turn.status!=='succeeded'){
+                    setMessages(old=>[...new Map([...old,receipt.message!].map(m=>[m.id,m])).values()].sort((a,b)=>a.messageSeq-b.messageSeq));
+                }else await historyPage(); // Compatibility with earlier backends and completed replayed turns.
+            }
         }catch(e){setNotice(writeError(e));}finally{sending.current=false;setWriteBusy(false);}
     }
     async function retryReply(){
@@ -172,6 +185,11 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
         navigate(route, { replace: true }); }
     const conversation = rooms.find(r => r.id === selected), room = conversation ? roomOf(conversation) : undefined;
     const display: Message[] = messages.map(m => ({ id: m.id, turnId: m.turnId, author: m.role === 'user' ? 'me' : 'yan', versions: [m.content], version: 0, time: Date.parse(m.createdAt), sourceRef: { messageId: m.id, revision: m.revision ?? 1 } }));
+    if(live&&selected){
+        const waiting=pending.current.get(selected);
+        if(waiting&&turn?.clientMessageId!==waiting.clientMessageId)display.push({id:waiting.clientMessageId,turnId:waiting.clientMessageId,author:'me',versions:[waiting.content],version:0,time:waiting.time,delivery:'sending'});
+        if(turn?.status==='running'&&progress[selected])display.push({id:'stream-'+turn.id,turnId:turn.id,author:'yan',versions:[progress[selected]],version:0,time:Date.parse(turn.createdAt),delivery:'streaming'});
+    }
     async function copySource(m: Message) { if (!selected || selectedRef.current !== selected)
         throw Error('会话已切换'); const source = messages.find(row => row.id === m.id); if (!source)
         throw Error('来源已失效'); const page = await api<ChatHistoryPage>(base + '/conversations/' + selected + '/messages?limit=1&before=' + (source.messageSeq + 1)); const current = page.items.find(row => row.id === m.id); if (!current || (current.revision ?? 1) !== m.sourceRef?.revision)

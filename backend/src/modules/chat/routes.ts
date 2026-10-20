@@ -28,7 +28,9 @@ export function chatRouter(service: ChatService) {
   router.post('/conversations/:id/messages',async(req,res) => {
     const body = objectBody(req.body);
     text(body.content,'content',service.config.maxMessageChars);
+    const started=performance.now();
     const result = await service.send({conversationId:uuid(req.params.id,'conversationId'),clientMessageId:uuid(body.clientMessageId,'clientMessageId'),content:body.content as string});
+    res.setHeader('Server-Timing','accept;dur='+(performance.now()-started).toFixed(1));
     res.status(202).json(result);
   });
   for(const method of ['patch','delete'] as const) router[method]('/messages/:id',(req,res)=>{
@@ -39,7 +41,8 @@ export function chatRouter(service: ChatService) {
   router.get('/turns/:id',(req,res) => {
     const turn = store.turn(uuid(req.params.id,'turnId'));
     const messages = store.db.prepare('SELECT m.id,m.turn_id AS turnId,m.message_seq AS messageSeq,m.role,COALESCE(s.content,m.content) AS content,m.created_at AS createdAt,COALESCE(s.revision,1) AS revision FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id WHERE m.turn_id=? AND s.deleted_at IS NULL ORDER BY m.message_seq').all(turn.id);
-    res.json({turn,messages});
+    // Additive volatile progress; only committed messages above are archival sources.
+    res.json({turn,messages,progress:turn.status==='running'?service.progress(turn.id):null,timings:service.timing(turn.id)});
   });
   router.post('/turns/:id/retry',(req,res) => {
     const body = objectBody(req.body);

@@ -6,6 +6,19 @@ import { ModelError, type ModelProvider, type ProviderUsage } from './provider.j
 import { ChatError, ChatStore } from './store.js';
 /** Exactly one backend process owns this SQLite queue. No LLM polling timer. */
 export class ChatService {
+  // At most one active model call; preview is volatile and never a durable message.
+  private preview: {turnId:string;content:string;started:number;firstTokenMs:number|null} | null = null;
+  private readonly timings = new Map<string,{modelMs:number;firstTokenMs:number|null}>();
+  progress(turnId:string) {
+    return this.preview?.turnId===turnId ? {content:this.preview.content,firstTokenMs:this.preview.firstTokenMs} : null;
+  }
+  timing(turnId:string) { return this.timings.get(turnId) ?? null; }
+  private rememberTiming(turnId:string) {
+    if (this.preview?.turnId!==turnId) return;
+    this.timings.set(turnId,{modelMs:Math.round(performance.now()-this.preview.started),firstTokenMs:this.preview.firstTokenMs});
+    if(this.timings.size>64)this.timings.delete(this.timings.keys().next().value!);
+    this.preview=null;
+  }
   private working: Promise<void> | null = null;
   private stopped = false;
   private started = false;
@@ -25,14 +38,14 @@ export class ChatService {
   }
   async send(message: ClientMessage) {
     const prior = this.store.findOriginal(message);
-    if(prior) return { ...this.store.receipt(prior), turn:prior };
+    if(prior) {const receipt=this.store.receipt(prior);return {...receipt,turn:prior,message:this.store.message(receipt.messageId)};}
     if(!this.configured) throw new ChatError(503,'MODEL_NOT_CONFIGURED');
     if(this.stopped) throw new ChatError(503,'CHAT_WORKER_UNAVAILABLE');
     const queued = Number(this.store.db.prepare("SELECT count(*) AS n FROM chat_turns WHERE status IN ('queued','running')").get()!.n);
     if(queued >= this.config.maxQueued) throw new ChatError(429,'CHAT_QUEUE_FULL');
     const receipt = await this.store.accept(message);
     this.kick();
-    return {...receipt,turn:this.store.turn(receipt.turnId)};
+    return {...receipt,turn:this.store.turn(receipt.turnId),message:this.store.message(receipt.messageId)};
   }
   retry(turnId: string, retryId: string, acknowledgeUnknown: boolean) {
     this.store.transaction(() => {
@@ -53,7 +66,7 @@ export class ChatService {
   }
   private kick() {
     if(this.stopped || !this.provider || this.working) return;
-    this.working = this.drain().catch(() => { console.error('Chat worker stopped: persistence failure; restart required'); this.stopped = true; }).finally(() => {this.working=null;
+    this.working = this.drain().catch(() => { console.error('Chat worker stopped: persistence failure; restart required'); this.stopped = true; this.preview=null; }).finally(() => {this.working=null;
       if(!this.stopped && this.provider && this.store.db.prepare("SELECT 1 FROM chat_turns WHERE status='queued' LIMIT 1").get()) this.kick();
     });
   }
@@ -72,6 +85,7 @@ export class ChatService {
       const controller = new AbortController(); this.controller = controller;
       let timer: ReturnType<typeof setTimeout> | undefined;
       let reply;
+      this.preview={turnId:turn.id,content:'',started:performance.now(),firstTokenMs:null};
       try {
         const messages = assembleContext(this.store,turn.id,this.config);
         // Enforce deadline even for replaceable providers that fail to honor cancellation.
@@ -80,11 +94,15 @@ export class ChatService {
           controller.signal.addEventListener('abort',abort,{once:true});
           timer = setTimeout(() => controller.abort(),this.config.timeoutMs);
         });
-        reply = await Promise.race([this.provider.complete(messages,controller.signal),deadline]);
+        reply = await Promise.race([this.provider.complete(messages,controller.signal,content=>{
+          if(controller.signal.aborted||this.preview?.turnId!==turn.id)return;
+          this.preview.content=content;
+          if(content&&this.preview.firstTokenMs===null)this.preview.firstTokenMs=Math.round(performance.now()-this.preview.started);
+        }),deadline]);
       } catch(error) {
         const failure = error instanceof ModelError ? error : new ModelError('MODEL_CALL_FAILED','unknown');
         this.finishFailure(turn,attemptId,failure); continue;
-      } finally { if(timer) clearTimeout(timer); this.controller = null; }
+      } finally { if(timer) clearTimeout(timer); this.controller = null; this.rememberTiming(turn.id); }
       // Persist reply, successful outcome and outbox atomically; a DB error must not be reported as a supplier error.
       this.store.transaction(() => {
         const now = new Date().toISOString();

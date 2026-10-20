@@ -4,7 +4,7 @@ export interface ModelReply { content: string; usage: ProviderUsage; requestId: 
 export interface ModelProvider {
   readonly name: string;
   readonly model: string;
-  complete(messages: readonly ModelMessage[], signal: AbortSignal): Promise<ModelReply>;
+  complete(messages: readonly ModelMessage[], signal: AbortSignal, onText?: (content: string) => void): Promise<ModelReply>;
 }
 /** Unknown means a supplier may have generated/billed a response. Never retry automatically. */
 export class ModelError extends Error {
