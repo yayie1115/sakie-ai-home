@@ -1,6 +1,6 @@
 import { ApiError, AuthenticatedApiContext, SessionActionsContext, type AuthenticatedApi } from './api';
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
-export function AuthenticationGate({children,presentation='default'}:{children:ReactNode;presentation?:'default'|'m0'}){
+export function AuthenticationGate({children,presentation='default'}:{children:ReactNode;presentation?:'default'|'m0'|'chat'}){
   const [status,setStatus]=useState<'loading'|'login'|'ready'|'error'>('loading');const[password,setPassword]=useState('');const[csrfToken,setCsrfToken]=useState('');const[error,setError]=useState('');const[busy,setBusy]=useState(false);
   useEffect(()=>{let active=true;fetch('/api/auth/session',{credentials:'same-origin',cache:'no-store'}).then(async response=>{
     if(!active)return;if(response.ok){const body=await response.json();if(active){setCsrfToken(body.csrfToken);setStatus('ready');}}
@@ -22,8 +22,8 @@ export function AuthenticationGate({children,presentation='default'}:{children:R
     if(!response.ok)throw new ApiError(response.status,body.error??'REQUEST_FAILED');
     return body as T;
   },[csrfToken]);
-  if(status==='loading')return <p role="status" className={presentation==='m0'?'m0-auth-status':undefined}>正在检查登录状态…</p>;
+  if(status==='loading')return <p role="status" className={presentation!=='default'?'m0-auth-status':undefined}>正在检查登录状态…</p>;
   if(status==='error')return <p role="alert">无法连接服务，请刷新重试。</p>;
-  if(status==='login')return <main className={presentation==='m0'?'m0-login':undefined}><h1>{presentation==='m0'?'小家':'sakie-ai-home'}</h1>{presentation==='m0'&&<p>独立只读测试 · M0-2</p>}<form onSubmit={login}><label htmlFor="owner-password">访问密码</label><input id="owner-password" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required maxLength={256}/><button disabled={busy} type="submit">登录</button></form>{error&&<p role="alert">{error}</p>}</main>;
-  return <SessionActionsContext.Provider value={{logout,busy}}>{presentation!=='m0'&&<button disabled={busy} onClick={logout}>退出登录</button>}{error&&<p role="alert">{error}</p>}<AuthenticatedApiContext.Provider value={api}>{children}</AuthenticatedApiContext.Provider></SessionActionsContext.Provider>;
+  if(status==='login')return <main className={presentation!=='default'?'m0-login':undefined}><h1>{presentation!=='default'?'小家':'sakie-ai-home'}</h1>{presentation==='m0'&&<p>独立只读测试 · M0-2</p>}<form onSubmit={login}><label htmlFor="owner-password">访问密码</label><input id="owner-password" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required maxLength={256}/><button disabled={busy} type="submit">登录</button></form>{error&&<p role="alert">{error}</p>}</main>;
+  return <SessionActionsContext.Provider value={{logout,busy}}>{presentation==='default'&&<button disabled={busy} onClick={logout}>退出登录</button>}{error&&<p role="alert">{error}</p>}<AuthenticatedApiContext.Provider value={api}>{children}</AuthenticatedApiContext.Provider></SessionActionsContext.Provider>;
 }

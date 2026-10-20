@@ -9,7 +9,7 @@ function uuid(value: unknown, field: string): string {
 }
 export function chatRouter(service: ChatService) {
   const router = Router(), store = service.store;
-  router.get('/config',(_req,res) => res.json({configured:service.configured,maxMessageChars:service.config.maxMessageChars,memoryStatus:'unavailable'}));
+  router.get('/config',(_req,res) => res.json({configured:service.configured,model:service.configured?service.config.model:null,maxMessageChars:service.config.maxMessageChars,memoryStatus:'unavailable'}));
   router.get('/conversations',(req,res) => {
     const limit = pageNumber(req.query.limit,20,'limit',1,100), before = pageNumber(req.query.before,Number.MAX_SAFE_INTEGER,'before',1,Number.MAX_SAFE_INTEGER);
     const rows = store.conversations(before,limit+1); const items = rows.slice(0,limit);

@@ -9,7 +9,8 @@ import { AuthenticationGate } from './app/AuthenticationGate';
 /** Re-evaluate the public synthetic preview exception on every in-app navigation. */
 function ApplicationRoutes() {
   const { pathname } = useLocation();
-  if(pathname==='/m0/chat')return <M0Boundary><AppRouter/></M0Boundary>;
+  if(pathname==='/chat')return <M0Boundary key="live-chat" live><AppRouter/></M0Boundary>;
+  if(pathname==='/m0/chat')return <M0Boundary key="isolated-m0"><AppRouter/></M0Boundary>;
   return pathname === '/demo/chat-group'
     ? <AppRouter />
     : <AuthenticationGate><AppRouter /></AuthenticationGate>;

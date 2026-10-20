@@ -1,4 +1,4 @@
-/* M0 only: reuse v11 tokens and components, no changes to /chat or old previews. */
+/* Shared v11 mobile viewport for authenticated Chat and the isolated read-only M0 page. */
 body.m0-page{margin:0;overflow:hidden;overscroll-behavior:none;background:#f4f7f9}
 .m0-root{--m0-paper:#fff;--m0-ink:#283b4a;--m0-accent:#7598b3;position:fixed;inset-inline:0;top:var(--m0-offset,0px);height:var(--m0-height,100dvh);padding-top:env(safe-area-inset-top,0px);box-sizing:border-box;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif;color:var(--m0-ink)}
 .m0-root *{box-sizing:border-box}.m0-root button,.m0-root input,.m0-root textarea{font:inherit}.m0-root button{min-height:40px}.m0-root button:disabled{cursor:not-allowed;opacity:.45}.m0-root input,.m0-root textarea{font-size:16px!important}
@@ -9,3 +9,5 @@ body.m0-page{margin:0;overflow:hidden;overscroll-behavior:none;background:#f4f7f
 .m0-shell.dark{color:#dde9ef;background:#253541}.m0-shell.dark .m0-drawer{background:#1f2d39}.m0-shell.dark .m0-main-nav{background:#253541;border-color:#405460}.m0-shell.dark .m0-main-nav button{color:#a4b7c4}.m0-shell.dark .m0-main-nav button[aria-current]{color:#dde9ef}
 @media(max-width:700px){.m0-root .m0-workspace{min-height:0;border-radius:0}.m0-workspace.show-list>.v11-chat{display:none}.m0-workspace.show-list>.v11-sidebar{position:static;display:flex;width:100%;height:100%}.m0-workspace.show-chat>.v11-sidebar{display:none}.m0-workspace .v11-chat{width:100%}.m0-workspace .v11-bubblebar button{min-height:40px}.m0-workspace .v11-chat-title small{font-size:10px}.m0-workspace .v11-primary{padding-inline:10px;font-size:12px}.m0-workspace .v11-chat-head{padding-inline:max(8px,env(safe-area-inset-left)) max(8px,env(safe-area-inset-right))}}
 @media(prefers-reduced-motion:reduce){.m0-shell{transition:none}}
+
+.live-chat-status{flex:none;padding:6px 12px;font-size:12px;line-height:1.5;color:#718594}.live-chat-status button{margin-left:8px}

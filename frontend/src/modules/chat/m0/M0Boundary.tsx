@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 import { AuthenticationGate } from '../../../app/AuthenticationGate';
 import './mobile-chat.css';
 export const M0EnvironmentContext = createContext({ fixture: false });
-export function M0Boundary({ children }: {
+export function M0Boundary({ children, live = false }: {
+    live?: boolean;
     children: ReactNode;
 }) {
     const root = useRef<HTMLDivElement>(null);
@@ -29,6 +30,7 @@ export function M0Boundary({ children }: {
         return () => { cancelAnimationFrame(frame); document.body.classList.remove('m0-page'); window.removeEventListener('resize', measure); window.visualViewport?.removeEventListener('resize', measure); window.visualViewport?.removeEventListener('scroll', measure); document.removeEventListener('focusin', measure); document.removeEventListener('focusout', measure); };
     }, []);
     useEffect(() => {
+        if (live) { setStatus('ready'); return; }
         let active = true;
         const controller = new AbortController();
         // A regular Vite/production page must not probe owner/session or business APIs.
@@ -44,6 +46,6 @@ export function M0Boundary({ children }: {
         } }).catch(() => { if (active)
             setStatus('blocked'); });
         return () => { active = false; controller.abort(); };
-    }, []);
-    return <div ref={root} className="m0-root">{status === 'ready' ? <M0EnvironmentContext.Provider value={{ fixture }}><AuthenticationGate presentation="m0">{children}</AuthenticationGate></M0EnvironmentContext.Provider> : <main className="m0-login" role={status === 'blocked' ? 'alert' : 'status'}><p>{status === 'blocked' ? '未连接独立 M0 只读测试服务，已停止；不会请求登录或聊天数据。' : '正在核对独立测试环境…'}</p></main>}</div>;
+    }, [live]);
+    return <div ref={root} className="m0-root">{status === 'ready' ? <M0EnvironmentContext.Provider value={{ fixture }}><AuthenticationGate presentation={live ? "chat" : "m0"}>{children}</AuthenticationGate></M0EnvironmentContext.Provider> : <main className="m0-login" role={status === 'blocked' ? 'alert' : 'status'}><p>{status === 'blocked' ? '未连接独立 M0 只读测试服务，已停止；不会请求登录或聊天数据。' : '正在核对独立测试环境…'}</p></main>}</div>;
 }
