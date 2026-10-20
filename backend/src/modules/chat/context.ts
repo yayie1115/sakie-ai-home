@@ -20,7 +20,9 @@ export function assembleContext(store: ChatStore, turnId: string, config: ChatCo
     remaining -= user.length + assistant.length;
     pairs.unshift([{role:'user',content:user},{role:'assistant',content:assistant}]);
   }
-  return [{role:'system',content:config.systemPrompt},
+  // A legacy global prompt is never silently reused as the persona of newly selected members.
+  const systemPrompt=store.conversation(turn.conversationId)?.profile?'':config.systemPrompt;
+  return [...(systemPrompt?[{role:'system' as const,content:systemPrompt}]:[]),
     {role:'system',content:'当前长期记忆和 Windows 归档检索不可用。你只能依据本次提供的近期对话作答，不得声称读取过旧记忆或编造共同经历。'},
     ...pairs.flat(),{role:'user',content}];
 }

@@ -1,3 +1,4 @@
+import {migrateLiveChat} from '../src/modules/chat/live-schema.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
@@ -26,7 +27,7 @@ function fake(complete:ModelProvider['complete']=async()=>reply()):ModelProvider
 function conversation(store:ChatStore){const id=randomUUID();store.createConversation(id,'test');return id;}
 const input=(conversationId:string,content='测试消息')=>({conversationId,content,clientMessageId:randomUUID()});
 async function harness(provider:ModelProvider|null=fake()){
- const db=openDatabase(':memory:'),store=new ChatStore(db),chat=new ChatService(store,provider,settings());chat.start();
+ const db=openDatabase(':memory:');migrateLiveChat(db);const store=new ChatStore(db),chat=new ChatService(store,provider,settings());chat.start();
  const auth=new AuthService(db,{loadCredential:()=>testCredential,publicOrigin:'http://127.0.0.1:5173',secureCookies:false});
  const server=createApp(db,{auth,chat}).listen(0,'127.0.0.1');await once(server,'listening');const address=server.address();assert.ok(address&&typeof address!=='string');
  const base='http://127.0.0.1:'+address.port;const authorized=await authenticatedFetch(()=>base);const request:typeof fetch=(url,init={})=>{const headers=new Headers(init.headers);if(init.body)headers.set('Content-Type','application/json');return authorized(url,{...init,headers});};
@@ -40,7 +41,7 @@ test('chat HTTP flow is authenticated, CSRF protected, idempotent, ordered and p
   // A valid cookie without CSRF cannot create conversations.
   const anonymous=await fetch(app.base+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:'phase1-test-password-only'})});
   assert.equal((await fetch(route+'/conversations',{method:'POST',headers:{Cookie:anonymous.headers.get('set-cookie')!.split(';')[0],'Content-Type':'application/json'},body:'{}'})).status,403);
-  const id=randomUUID();const create=()=>app.request(route+'/conversations',{method:'POST',body:JSON.stringify({id,title:'test'})});assert.equal((await create()).status,201);await create();
+  const id=randomUUID();const create=()=>app.request(route+'/conversations',{method:'POST',body:JSON.stringify({id,title:'test',kind:'private',members:['mu']})});assert.equal((await create()).status,201);await create();
   const message=input(id,'  保留原文空白  '),url=route+'/conversations/'+id+'/messages';
   const send=()=>app.request(url,{method:'POST',body:JSON.stringify(message)});const accepted=await send();assert.equal(accepted.status,202);const receipt=await accepted.json();assert.equal(receipt.durable,true);
   await app.chat.idle();for(let i=0;i<10;i++)assert.equal((await (await send()).json()).turnId,receipt.turnId);
@@ -55,6 +56,18 @@ test('chat HTTP flow is authenticated, CSRF protected, idempotent, ordered and p
   const outbox=app.db.prepare('SELECT * FROM chat_outbox ORDER BY stream_seq').all();assert.equal(outbox.length,2);
   for(const event of outbox)assert.equal(event.payload_hash,hashContent(String(event.payload)));
   assert.equal(JSON.parse(String(outbox[0].payload)).id,receipt.messageId);
+  assert.deepEqual((await (await app.request(route+'/conversations')).json()).items[0].profile,{kind:'private',members:['mu']});
+  assert.equal(history.items[0].speakerId,'mu');
+  const groupId=randomUUID();
+  assert.equal((await app.request(route+'/conversations',{method:'POST',body:JSON.stringify({id:groupId,title:'真实结构的隔离群',kind:'group',members:[]})})).status,400);
+  assert.equal((await app.request(route+'/conversations',{method:'POST',body:JSON.stringify({id:groupId,title:'真实结构的隔离群',kind:'group',members:['mu','xing']})})).status,201);
+  const groupInput={...input(groupId),replyToMemberId:'xing'},groupUrl=route+'/conversations/'+groupId+'/messages';
+  assert.equal((await app.request(groupUrl,{method:'POST',body:JSON.stringify({...groupInput,replyToMemberId:'yan'})})).status,403);
+  const groupReceipt=await (await app.request(groupUrl,{method:'POST',body:JSON.stringify(groupInput)})).json();await app.chat.idle();
+  const groupHistory=await (await app.request(groupUrl)).json();assert.equal(groupHistory.items[1].speakerId,'xing');
+  assert.equal((await (await app.request(route+'/turns/'+groupReceipt.turnId)).json()).turn.replyToMemberId,'xing');
+  assert.equal((await app.request(groupUrl,{method:'POST',body:JSON.stringify({...groupInput,replyToMemberId:'mu'})})).status,409);
+
  }finally{await app.close();}
 });
 test('unconfigured provider permits history but rejects a new call without storing misleading accepted messages',async()=>{

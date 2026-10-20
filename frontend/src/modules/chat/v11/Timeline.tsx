@@ -4,11 +4,11 @@ import { useLongPress } from './useLongPress';
 
 type Props={room:Room;messages:Message[];composer:Composer;onCompose:(patch:Partial<Composer>)=>void;
  onStage:()=>void;onSubmit:()=>void;onMessages:(messages:Message[])=>void;onPending:(messages:Message[])=>void;
- onBack:()=>void;onDetails:()=>void;notice:(message:string)=>void;jumpId?:string;onJumped:()=>void;locked?:boolean;linked?:boolean;onOperate?:(m:Message,action:string,value?:string)=>Promise<void>;onRead?:(m:Message)=>Promise<string>;live?:{disabled:boolean;maxLength:number;status:string};m0?:{modelLabel:string;onNavigation:()=>void;initialLatest:boolean;hasEarlier:boolean;loadEarlier:()=>Promise<void>;loadingEarlier:boolean}};
+ onBack:()=>void;onDetails:()=>void;notice:(message:string)=>void;jumpId?:string;onJumped:()=>void;locked?:boolean;linked?:boolean;onOperate?:(m:Message,action:string,value?:string)=>Promise<void>;onRead?:(m:Message)=>Promise<string>;live?:{disabled:boolean;maxLength:number;status:string;replyPicker?:React.ReactNode};m0?:{modelLabel:string;onNavigation:()=>void;initialLatest:boolean;hasEarlier:boolean;loadEarlier:()=>Promise<void>;loadingEarlier:boolean}};
 function Bubble({m,room,selected,onOpen,onQuoteJump,children}:{m:Message;room:Room;selected:boolean;onOpen:()=>void;onQuoteJump:(id:string)=>void;children:React.ReactNode}){
  const press=useLongPress(onOpen);
  return <article className={`v11-message ${m.author==='me'?'mine':''} ${selected?'chosen':''}`} data-message-id={m.id}>
-   <span className="v11-avatar" aria-hidden="true">{titleOf(room,m.author).slice(-1)}</span>
+   <span className="v11-avatar" aria-hidden="true">{m.author==='unattributed'?'AI':titleOf(room,m.author).slice(-1)}</span>
    <div className="v11-message-body">{room.kind==='group'&&m.author!=='me'&&<span className="v11-speaker">{titleOf(room,m.author)}</span>}
      {m.quote&&<button className="v11-quoted" disabled={m.quote.unavailable} onClick={()=>onQuoteJump(m.quote!.id)}>{m.quote.author}：{m.quote.text}</button>}
      <div className={`v11-bubble ${m.pending||m.delivery?'pending':''}`} {...press} tabIndex={0} onKeyDown={e=>{if(e.key==='F10'&&e.shiftKey){e.preventDefault();onOpen();}}}>{textOf(m)}</div>
@@ -81,6 +81,7 @@ export function Timeline(props:Props){
      {!all.length&&<p className="v11-empty">{readOnly?'此测试会话暂无已保存消息':'还没有消息，发出第一句问候吧。'}</p>}
    </div>
    <form className="v11-composer" onSubmit={e=>{e.preventDefault();if(props.live){if(!props.live.disabled)props.onSubmit();bottom();return;}if(readOnly){props.notice('发送待M0-3授权，本轮不会调用模型');return;}if(composer.draft.trim())stage();else if(composer.pending.length){props.onSubmit();bottom();}else props.notice('语音与通话尚未接入，不会启动录音');}}>
+     {props.live?.replyPicker}
      {composer.quote&&<div className="v11-quote-preview"><div><small>引用 · {composer.quote.author}</small><p>{composer.quote.text}</p></div><button type="button" onClick={()=>onCompose({quote:undefined})} aria-label="取消引用">×</button></div>}
      <div className="v11-compose-row"><button type="button" className="v11-icon" disabled={readOnly||!!props.live} title={readOnly?'附件尚未接通':undefined} onClick={()=>props.notice('图片、文件与语音尚未接入；不会上传文件')} aria-label="添加附件">＋</button>
        <textarea ref={input} disabled={props.locked} maxLength={props.live?.maxLength} aria-label="输入消息" enterKeyHint={props.m0?'enter':undefined} rows={1} placeholder={readOnly?'输入草稿，发送尚未接通':'输入消息…'} value={composer.draft} onChange={e=>onCompose({draft:e.target.value})} onKeyDown={e=>{if(!readOnly&&!props.live&&e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();if(composer.draft.trim())stage();}}}/>

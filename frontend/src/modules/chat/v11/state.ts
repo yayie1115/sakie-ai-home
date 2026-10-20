@@ -15,7 +15,7 @@ export function initialWorkspace(now = Date.now()):Workspace {
   return {schema:1,rooms:[room('privateYan','private','谢亦言',['yan'],now-60_000),room('home','group','小家群聊',['yan','mu'],now)],messages,composers:{}};
 }
 export const textOf=(message:Message)=>message.versions[message.version];
-export const titleOf=(r:Room,id:string)=>id==='me'?'我':r.remarks[id]??roles.find(a=>a.id===id)?.name??'AI';
+export const titleOf=(r:Room,id:string)=>id==='me'?'我':id==='unattributed'?'AI（历史归属未标注）':r.remarks[id]??roles.find(a=>a.id===id)?.name??'AI';
 export const sortedRooms=(state:Workspace,query='')=>state.rooms.filter(r=>r.deletedAt===undefined&&r.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a,b)=>Number(b.pinned)-Number(a.pinned)||b.activity-a.activity||a.id.localeCompare(b.id));
 export function compose(state:Workspace,id:string,patch:Partial<Composer>):Workspace {
   return {...state,composers:{...state.composers,[id]:{...(state.composers[id]??emptyComposer()),...patch}}};

@@ -1,3 +1,4 @@
+import {chatParticipants,conversationProfile} from './participants.js';
 import { reviseMessage } from '../sync/mutations.js';
 import { Router } from 'express';
 import { objectBody, pageNumber, text, ValidationError } from '../../shared/validation.js';
@@ -9,7 +10,7 @@ function uuid(value: unknown, field: string): string {
 }
 export function chatRouter(service: ChatService) {
   const router = Router(), store = service.store;
-  router.get('/config',(_req,res) => res.json({configured:service.configured,model:service.configured?service.config.model:null,maxMessageChars:service.config.maxMessageChars,memoryStatus:'unavailable'}));
+  router.get('/config',(_req,res) => res.json({configured:service.configured,model:service.configured?service.config.model:null,maxMessageChars:service.config.maxMessageChars,memoryStatus:'unavailable',participants:chatParticipants,conversationProfilesEnabled:store.liveReady,groupScheduling:'manual-single-reply',personaConfigured:false}));
   router.get('/conversations',(req,res) => {
     const limit = pageNumber(req.query.limit,20,'limit',1,100), before = pageNumber(req.query.before,Number.MAX_SAFE_INTEGER,'before',1,Number.MAX_SAFE_INTEGER);
     const rows = store.conversations(before,limit+1); const items = rows.slice(0,limit);
@@ -17,7 +18,11 @@ export function chatRouter(service: ChatService) {
   });
   router.post('/conversations',(req,res) => {
     const body = objectBody(req.body);
-    res.status(201).json(store.createConversation(uuid(body.id,'id'),text(body.title??'新对话','title',100)));
+    res.status(201).json(store.createConversation(uuid(body.id,'id'),text(body.title??'新对话','title',100),conversationProfile(body)));
+  });
+  router.put('/conversations/:id/profile',(req,res)=>{
+    const body=objectBody(req.body);
+    res.json(store.setProfile(uuid(req.params.id,'conversationId'),text(body.title,'title',100),conversationProfile(body)));
   });
   router.get('/conversations/:id/messages',(req,res) => {
     const id = uuid(req.params.id,'conversationId'), limit = pageNumber(req.query.limit,50,'limit',1,100);
@@ -29,7 +34,7 @@ export function chatRouter(service: ChatService) {
     const body = objectBody(req.body);
     text(body.content,'content',service.config.maxMessageChars);
     const started=performance.now();
-    const result = await service.send({conversationId:uuid(req.params.id,'conversationId'),clientMessageId:uuid(body.clientMessageId,'clientMessageId'),content:body.content as string});
+    const result = await service.send({conversationId:uuid(req.params.id,'conversationId'),clientMessageId:uuid(body.clientMessageId,'clientMessageId'),content:body.content as string,...(body.replyToMemberId!==undefined?{replyToMemberId:text(body.replyToMemberId,'replyToMemberId',100)}:{})});
     res.setHeader('Server-Timing','accept;dur='+(performance.now()-started).toFixed(1));
     res.status(202).json(result);
   });
@@ -40,7 +45,7 @@ export function chatRouter(service: ChatService) {
   });
   router.get('/turns/:id',(req,res) => {
     const turn = store.turn(uuid(req.params.id,'turnId'));
-    const messages = store.db.prepare('SELECT m.id,m.turn_id AS turnId,m.message_seq AS messageSeq,m.role,COALESCE(s.content,m.content) AS content,m.created_at AS createdAt,COALESCE(s.revision,1) AS revision FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id WHERE m.turn_id=? AND s.deleted_at IS NULL ORDER BY m.message_seq').all(turn.id);
+    const messages = store.turnMessages(turn.id);
     // Additive volatile progress; only committed messages above are archival sources.
     res.json({turn,messages,progress:turn.status==='running'?service.progress(turn.id):null,timings:service.timing(turn.id)});
   });

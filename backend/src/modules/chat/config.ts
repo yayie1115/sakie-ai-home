@@ -13,7 +13,7 @@ export function parseChatConfig(env: NodeJS.ProcessEnv): ChatConfig {
   const apiKey = env.DEEPSEEK_API_KEY?.trim() ?? '';
   const model = env.DEEPSEEK_MODEL?.trim() ?? '';
   if (/[\r\n]/.test(apiKey) || model.length > 200 || /[\r\n]/.test(model)) throw new Error('Invalid DeepSeek configuration');
-  const systemPrompt = env.CHAT_SYSTEM_PROMPT ?? '你是 sakie，用户的私人 AI 伴侣。诚实、自然地用文字交流。';
+  const systemPrompt = env.CHAT_SYSTEM_PROMPT ?? '';
   if (systemPrompt.length > 16000) throw new Error('CHAT_SYSTEM_PROMPT is too long');
   const maxMessageChars = number('CHAT_MAX_MESSAGE_CHARS', 12000, 1, 64000);
   const contextChars = number('CHAT_CONTEXT_MAX_CHARS', 48000, 1000, 200000);
