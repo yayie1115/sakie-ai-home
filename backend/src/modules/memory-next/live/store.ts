@@ -1,3 +1,4 @@
+import {batchReady,isBatchParent,segmentSource,segmentSnapshot} from '../../chat/live-batch.js';
 import {conversationDeleted} from '../../app-ui/schema.js';
 import {createHash,randomUUID} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
@@ -50,7 +51,8 @@ export class LiveMemoryStore{
   return rows.flatMap(row=>{try{const c=this.context(String(row.id),target.actor);return c.realm===target.realm&&(target.audience==='private'||c.conversationId===target.conversationId)?[c]:[];}catch{return [];}});
  }
  evidence(id:string,actor:string):Evidence|null{
-  const row=this.db.prepare(`SELECT m.conversation_id,m.role,m.created_at,t.status,COALESCE(s.revision,1) revision,COALESCE(s.content,m.content) content,s.deleted_at FROM chat_messages m JOIN chat_turns t ON t.id=m.turn_id LEFT JOIN chat_message_state s ON s.message_id=m.id WHERE m.id=?`).get(id);
+  const part=segmentSource(this.db,id);if(isBatchParent(this.db,id))return null;
+  const row=part?{conversation_id:part.conversation_id,role:'user',created_at:part.created_at,status:part.status,revision:part.revision,content:part.content,deleted_at:part.deleted_at}:this.db.prepare(`SELECT m.conversation_id,m.role,m.created_at,t.status,COALESCE(s.revision,1) revision,COALESCE(s.content,m.content) content,s.deleted_at FROM chat_messages m JOIN chat_turns t ON t.id=m.turn_id LEFT JOIN chat_message_state s ON s.message_id=m.id WHERE m.id=?`).get(id);
   if(!row||row.status!=='succeeded'||row.deleted_at||!String(row.content).trim())return null;
   let c:MemoryContext;try{c=this.context(String(row.conversation_id),actor);}catch{return null;}
   return {eventId:`chat:${id}:v${row.revision}`,source:{id,version:String(row.revision),context:c.realm,scope:{type:c.audience,actors:[actor]},active:true,deleted:false,occurredAt:String(row.created_at)},text:String(row.content),role:String(row.role),conversationId:c.conversationId};
@@ -58,7 +60,7 @@ export class LiveMemoryStore{
  sources(c:MemoryContext,turnId?:string){
   const projection=readChatV4Sources(this.db,{conversationId:c.conversationId,actorIds:[c.actor],beforeSeq:Number.MAX_SAFE_INTEGER,limit:100});
   if(projection.status!=='ok')throw new MemoryError(503,'MEMORY_SOURCE_UNAVAILABLE');
-  if(turnId)return this.db.prepare('SELECT id FROM chat_messages WHERE turn_id=? AND conversation_id=?').all(turnId,c.conversationId).flatMap(r=>{const e=this.evidence(String(r.id),c.actor);return e?[e]:[];});
+  if(turnId)return this.db.prepare('SELECT id FROM chat_messages WHERE turn_id=? AND conversation_id=?').all(turnId,c.conversationId).flatMap(r=>{const ids=isBatchParent(this.db,String(r.id))?segmentSnapshot(this.db,String(r.id)).filter(p=>!p.deletedAt).map(p=>String(p.id)):[String(r.id)];return ids.flatMap(id=>{const e=this.evidence(id,c.actor);return e?[e]:[];});});
   return projection.sources.flatMap(s=>{const e=this.evidence(s.source.id,c.actor);return e?[e]:[];});
  }
  valid(row:Entry,target:MemoryContext){
@@ -96,7 +98,7 @@ export class LiveMemoryStore{
  }
  rawSearch(c:MemoryContext,query:string,browse=false,before=Number.MAX_SAFE_INTEGER){
   const contexts=this.origins(c),ids=contexts.map(x=>x.conversationId);if(!ids.length)return {items:[],partial:false,nextBefore:null};
-  const rows=this.db.prepare(`SELECT m.id,m.rowid cursor FROM chat_messages m JOIN chat_turns t ON t.id=m.turn_id WHERE m.conversation_id IN (${ids.map(()=>'?').join(',')}) AND t.status='succeeded' AND m.rowid<? ORDER BY m.rowid DESC LIMIT ?`).all(...ids,before,this.config.pool+1);
+  const rows=batchReady(this.db)?this.db.prepare(`SELECT * FROM (SELECT m.id,m.rowid*32 cursor FROM chat_messages m JOIN chat_turns t ON t.id=m.turn_id WHERE m.conversation_id IN (${ids.map(()=>'?').join(',')}) AND t.status='succeeded' AND m.id NOT IN (SELECT parent_id FROM chat_live_submissions) UNION ALL SELECT p.id,m.rowid*32+p.position+1 cursor FROM chat_live_segments p JOIN chat_messages m ON m.id=p.parent_id JOIN chat_turns t ON t.id=m.turn_id WHERE m.conversation_id IN (${ids.map(()=>'?').join(',')}) AND t.status='succeeded') WHERE cursor<? ORDER BY cursor DESC LIMIT ?`).all(...ids,...ids,before,this.config.pool+1):this.db.prepare(`SELECT m.id,m.rowid cursor FROM chat_messages m JOIN chat_turns t ON t.id=m.turn_id WHERE m.conversation_id IN (${ids.map(()=>'?').join(',')}) AND t.status='succeeded' AND m.rowid<? ORDER BY m.rowid DESC LIMIT ?`).all(...ids,before,this.config.pool+1);
   const q=query.normalize('NFKC').toLowerCase().trim();
   const items:Array<{id:string;layer:string;statement:string;source:{id:string;revision:string;conversationId:string;role:string;occurredAt:string}}>=[];let cursor:number|null=null,scanned=0;
   for(const r of rows.slice(0,this.config.pool)){scanned++;cursor=Number(r.cursor);const e=this.evidence(String(r.id),c.actor);if(e&&(browse||e.text.normalize('NFKC').toLowerCase().includes(q)))items.push({id:e.source.id,layer:'experience',statement:e.text,source:{id:e.source.id,revision:e.source.version,conversationId:e.conversationId,role:e.role,occurredAt:e.source.occurredAt}});if(items.length>=(browse?20:this.config.recallLimit))break;}

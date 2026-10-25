@@ -1,6 +1,6 @@
 /** v11 view types and isolated workspace helpers; durable Chat records remain in the API. */
 export type Quote = { unavailable?:boolean; id: string; author: string; text: string; source?: { conversationId: string; messageId: string; revision: number; bubbleId?: string } };
-export type Message = { usage?: {inputTokens:number|null;outputTokens:number|null;cacheReadTokens:number|null;cacheWriteTokens:number|null}; delivery?:'sending'|'streaming'; versionIds?:string[]; id: string; turnId: string; author: string; versions: string[]; version: number; time: number; quote?: Quote; pending?: boolean; sourceRef?: {messageId:string;revision:number} };
+export type Message = { usage?: {cacheRateApplicable?:boolean;inputTokens:number|null;outputTokens:number|null;cacheReadTokens:number|null;cacheWriteTokens:number|null}; delivery?:'sending'|'streaming'; versionIds?:string[]; id: string; turnId: string; author: string; versions: string[]; version: number; time: number; quote?: Quote; pending?: boolean; sourceRef?: {messageId:string;revision:number} };
 export type Room = { id: string; kind: 'private' | 'group'; name: string; members: string[]; remarks: Record<string,string>; activity: number; pinned: boolean; deletedAt?: number; rules: { mixed: boolean; mentions: boolean; limited: boolean } };
 export type Composer = { draft: string; quote?: Quote; pending: Message[]; scroll: number };
 export type Workspace = { schema: 1; rooms: Room[]; messages: Record<string,Message[]>; composers: Record<string,Composer> };

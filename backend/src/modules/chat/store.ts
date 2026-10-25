@@ -1,3 +1,4 @@
+import {batchReady,batchHash,validateSegments,insertSegments,segmentSnapshot,projectSegments} from './live-batch.js';
 import {conversationDeleted,uiReady} from '../app-ui/schema.js';
 import { hasLiveChat } from './live-schema.js';
 import { conversationProfile } from './participants.js';
@@ -42,9 +43,9 @@ export class ChatStore implements CloudMessageStore {
   private speaker(turnId:string):string|null{return this.liveReady?String(this.db.prepare('SELECT member_id FROM chat_live_turn_speakers WHERE turn_id=?').get(turnId)?.member_id??'')||null:null;}
   private get speakerJoin(){return this.liveReady?' LEFT JOIN chat_live_turn_speakers sp ON sp.turn_id=m.turn_id ':'';}
   private get speakerColumn(){return this.liveReady?",CASE WHEN m.role='assistant' THEN sp.member_id ELSE NULL END AS speakerId":'';}
-  private withUsage(rows:ChatMessage[]):ChatMessage[]{if(!rows.length)return rows;const ids=[...new Set(rows.map(m=>m.turnId))];const calls=this.db.prepare("SELECT turn_id,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens FROM chat_attempts WHERE status='succeeded' AND turn_id IN ("+ids.map(()=>'?').join(',')+") ORDER BY rowid").all(...ids);const byTurn=new Map(calls.map(a=>[String(a.turn_id),{inputTokens:a.input_tokens as number|null,outputTokens:a.output_tokens as number|null,cacheReadTokens:a.cache_read_tokens as number|null,cacheWriteTokens:a.cache_write_tokens as number|null}]));return rows.map(m=>m.role==='assistant'?{...m,usage:byTurn.get(m.turnId)}:m);}
+  private withUsage(rows:ChatMessage[]):ChatMessage[]{if(!rows.length)return rows;const ids=[...new Set(rows.map(m=>m.turnId))];const calls=this.db.prepare("SELECT turn_id,provider,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens FROM chat_attempts WHERE status='succeeded' AND turn_id IN ("+ids.map(()=>'?').join(',')+") ORDER BY rowid").all(...ids);const byTurn=new Map(calls.map(a=>[String(a.turn_id),{cacheRateApplicable:a.provider==='deepseek',inputTokens:a.input_tokens as number|null,outputTokens:a.output_tokens as number|null,cacheReadTokens:a.cache_read_tokens as number|null,cacheWriteTokens:a.cache_write_tokens as number|null}]));return rows.map(m=>m.role==='assistant'?{...m,usage:(m.revision??1)===1?byTurn.get(m.turnId):undefined}:m);}
   turnMessages(turnId:string):ChatMessage[]{
-    return this.withUsage(this.db.prepare('SELECT m.id,m.turn_id AS turnId,m.message_seq AS messageSeq,m.role,COALESCE(s.content,m.content) AS content,m.created_at AS createdAt,COALESCE(s.revision,1) AS revision'+this.speakerColumn+' FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id'+this.speakerJoin+' WHERE m.turn_id=? AND s.deleted_at IS NULL ORDER BY m.message_seq').all(turnId) as unknown as ChatMessage[]);
+    return projectSegments(this.db,this.withUsage(this.db.prepare('SELECT m.id,m.turn_id AS turnId,m.message_seq AS messageSeq,m.role,COALESCE(s.content,m.content) AS content,m.created_at AS createdAt,COALESCE(s.revision,1) AS revision'+this.speakerColumn+' FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id'+this.speakerJoin+' WHERE m.turn_id=? AND s.deleted_at IS NULL ORDER BY m.message_seq').all(turnId) as unknown as ChatMessage[]));
   }
   transaction<T>(action: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -84,9 +85,10 @@ export class ChatStore implements CloudMessageStore {
     const row = this.db.prepare('SELECT id,conversation_id AS conversationId,client_message_id AS clientMessageId,turn_seq AS turnSeq,status,error_code AS errorCode,created_at AS createdAt FROM chat_turns WHERE id=?').get(id);
     if(!row||conversationDeleted(this.db,String(row.conversationId))) throw new ChatError(404,'TURN_NOT_FOUND'); return {...row,replyToMemberId:this.speaker(id)} as unknown as ChatTurn;
   }
-  messages(conversationId: string, before: number, limit: number): ChatMessage[] {
+  messages(conversationId: string, before: number, limit: number,raw=false): ChatMessage[] {
     if(!this.conversation(conversationId)) throw new ChatError(404,'CONVERSATION_NOT_FOUND');
-    return this.withUsage((this.db.prepare('SELECT m.id,m.turn_id AS turnId,m.message_seq AS messageSeq,m.role,COALESCE(s.content,m.content) AS content,m.created_at AS createdAt,COALESCE(s.revision,1) AS revision'+this.speakerColumn+' FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id'+this.speakerJoin+' WHERE m.conversation_id=? AND m.message_seq<? AND s.deleted_at IS NULL ORDER BY m.message_seq DESC LIMIT ?').all(conversationId,before,limit) as unknown as ChatMessage[]).reverse());
+    const rows=this.withUsage((this.db.prepare('SELECT m.id,m.turn_id AS turnId,m.message_seq AS messageSeq,m.role,COALESCE(s.content,m.content) AS content,m.created_at AS createdAt,COALESCE(s.revision,1) AS revision'+this.speakerColumn+' FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id'+this.speakerJoin+' WHERE m.conversation_id=? AND m.message_seq<? AND s.deleted_at IS NULL ORDER BY m.message_seq DESC LIMIT ?').all(conversationId,before,limit) as unknown as ChatMessage[]).reverse());
+    return raw?rows:projectSegments(this.db,rows);
   }
   unresolved(conversationId: string): ChatTurn | null {
     const row = this.db.prepare("SELECT id FROM chat_turns WHERE conversation_id=? AND status!='succeeded'").get(conversationId);
@@ -95,12 +97,14 @@ export class ChatStore implements CloudMessageStore {
   findOriginal(message: ClientMessage): ChatTurn | null {
     const row = this.db.prepare('SELECT id,content_hash FROM chat_turns WHERE conversation_id=? AND client_message_id=?').get(message.conversationId,message.clientMessageId);
     if(!row) return null;
+    if(batchReady(this.db)){const batch=this.db.prepare('SELECT request_hash FROM chat_live_submissions WHERE turn_id=?').get(row.id);if(batch&&(!message.segments||batch.request_hash!==batchHash([message.segments,message.replyToMemberId??null])))throw new ChatError(409,'BATCH_ID_CONFLICT');if(message.segments&&!batch)throw new ChatError(409,'MESSAGE_ID_CONFLICT');}
     if(row.content_hash !== hashContent(message.content)||this.speaker(String(row.id))!==this.replyMember(message)) throw new ChatError(409,'MESSAGE_ID_CONFLICT');
     return this.turn(String(row.id));
   }
   async accept(message: ClientMessage): Promise<DurableMessageReceipt> {
     return this.transaction(() => {
       const existing = this.findOriginal(message);
+      if(message.segments&&!existing)validateSegments(this.db,message.segments,message.conversationId);
       if(existing) return this.receipt(existing);
       if(!this.conversation(message.conversationId)) throw new ChatError(404,'CONVERSATION_NOT_FOUND');
       if(this.unresolved(message.conversationId)) throw new ChatError(409,'TURN_UNRESOLVED');
@@ -111,6 +115,7 @@ export class ChatStore implements CloudMessageStore {
       this.db.prepare("INSERT INTO chat_turns(id,conversation_id,client_message_id,content_hash,turn_seq,status,created_at,updated_at) VALUES (?,?,?,?,?,'queued',?,?)").run(turnId,message.conversationId,message.clientMessageId,hashContent(message.content),seq,now,now);
       if(member)this.db.prepare('INSERT INTO chat_live_turn_speakers VALUES (?,?,?)').run(turnId,message.conversationId,member);
       this.db.prepare('UPDATE chat_conversations SET next_turn_seq=next_turn_seq+1 WHERE id=?').run(message.conversationId);
+      insertSegments(this.db,message,turnId,messageId);
       this.appendMessage({id:messageId,conversationId:message.conversationId,turnId,messageSeq:seq*2-1,role:'user',content:message.content,createdAt:now});
       return {messageId,turnId,turnSeq:seq,durable:true};
     });
@@ -125,6 +130,8 @@ export class ChatStore implements CloudMessageStore {
   appendMessage(message: ChatMessage & {conversationId:string}) {
     const digest = hashContent(message.content);
     this.db.prepare('INSERT INTO chat_messages VALUES (?,?,?,?,?,?,?,?)').run(message.id,message.conversationId,message.turnId,message.messageSeq,message.role,message.content,digest,message.createdAt);
-    appendEvent(this.db,'chat.message.created',{...message,...(message.role==='assistant'&&this.speaker(message.turnId)?{speakerId:this.speaker(message.turnId)}:{}),...(this.profile(message.conversationId)?{conversation:{title:this.conversation(message.conversationId)!.title,...this.profile(message.conversationId)}}:{}),contentHash:digest});
+    appendEvent(this.db,'chat.message.created',{...message,...(isBatchParentPayload(this.db,message.id)),...(message.role==='assistant'&&this.speaker(message.turnId)?{speakerId:this.speaker(message.turnId)}:{}),...(this.profile(message.conversationId)?{conversation:{title:this.conversation(message.conversationId)!.title,...this.profile(message.conversationId)}}:{}),contentHash:digest});
   }
 }
+
+function isBatchParentPayload(db:DatabaseSync,id:string){const parts=segmentSnapshot(db,id);return parts.length?{segments:parts}:{};}

@@ -1,3 +1,4 @@
+import {batchReady,projectSegments,reviseSegment,segmentSource} from './live-batch.js';
 import {chatParticipants,conversationProfile} from './participants.js';
 import { reviseMessage } from '../sync/mutations.js';
 import { Router } from 'express';
@@ -10,7 +11,7 @@ function uuid(value: unknown, field: string): string {
 }
 export function chatRouter(service: ChatService, reauthorize?: (req: import('express').Request) => unknown, messageChanged?:(id:string)=>void) {
   const router = Router(), store = service.store;
-  router.get('/config',(_req,res) => res.json({configured:service.configured,model:service.configured?service.config.model:null,maxMessageChars:service.config.maxMessageChars,memoryStatus:'unavailable',participants:chatParticipants,conversationProfilesEnabled:store.liveReady,groupScheduling:'manual-single-reply',personaConfigured:false}));
+  router.get('/config',(_req,res) => res.json({configured:service.configured,model:service.configured?service.config.model:null,maxMessageChars:service.config.maxMessageChars,memoryStatus:'unavailable',participants:chatParticipants,conversationProfilesEnabled:store.liveReady,batchEnabled:batchReady(store.db),groupScheduling:'manual-single-reply',personaConfigured:false}));
   router.get('/conversations',(req,res) => {
     const limit = pageNumber(req.query.limit,20,'limit',1,100), before = pageNumber(req.query.before,Number.MAX_SAFE_INTEGER,'before',1,Number.MAX_SAFE_INTEGER);
     const rows = store.conversations(before,limit+1,req.query.q===undefined||req.query.q===''?'':text(req.query.q,'q',100)); const items = rows.slice(0,limit);
@@ -32,9 +33,15 @@ export function chatRouter(service: ChatService, reauthorize?: (req: import('exp
   router.get('/conversations/:id/messages',(req,res) => {
     const id = uuid(req.params.id,'conversationId'), limit = pageNumber(req.query.limit,50,'limit',1,100);
     const before = pageNumber(req.query.before,Number.MAX_SAFE_INTEGER,'before',1,Number.MAX_SAFE_INTEGER);
-    const rows = store.messages(id,before,limit+1); const hasMore = rows.length>limit; const items = hasMore ? rows.slice(1) : rows;
-    res.json({items,nextBefore:hasMore?items[0].messageSeq:null,unresolvedTurn:store.unresolved(id)});
+    const rows = store.messages(id,before,limit+1,true); const hasMore = rows.length>limit; const items = hasMore ? rows.slice(1) : rows;
+    res.json({items:projectSegments(store.db,items),nextBefore:hasMore?items[0].messageSeq:null,unresolvedTurn:store.unresolved(id)});
   });
+  router.post('/conversations/:id/batches',async(req,res)=>{
+    const b=objectBody(req.body),id=uuid(req.params.id,'conversationId');if(!batchReady(store.db))throw new ChatError(503,'BATCH_UPGRADE_REQUIRED');if(!Array.isArray(b.segments)||b.segments.length<1||b.segments.length>16)throw new ValidationError('Invalid segments');
+    const segments=b.segments as import('@sakie/contracts').LiveChatSegment[];for(const p of segments)text(p?.content,'content',service.config.maxMessageChars);if(segments.reduce((n,p)=>n+p.content.length+(p.quote?.selectedText?.length??0)+30,0)>service.config.maxMessageChars)throw new ValidationError('Batch context too long');const content=segments.map(p=>p.content).join('\n\n');text(content,'batch content',service.config.maxMessageChars);
+    const submissionId=uuid(b.submissionId,'submissionId');let result;try{result=await service.send({conversationId:id,clientMessageId:submissionId,content,segments,...(b.replyToMemberId!==undefined?{replyToMemberId:text(b.replyToMemberId,'replyToMemberId',100)}:{})});}catch(e){if(e instanceof Error&&'status' in e&&['INVALID_SEGMENTS','INVALID_SEGMENT','SEGMENT_ID_CONFLICT','QUOTE_SCOPE_DENIED','QUOTE_NOT_CURRENT','BATCH_UPGRADE_REQUIRED'].includes(e.message))throw new ChatError(Number(e.status),e.message);throw e;}res.status(202).json({...result,submissionId,conversationId:id,bubbleIds:segments.map(p=>p.id),messages:store.turnMessages(result.turn.id)});
+  });
+  router.get('/conversations/:id/batch-receipts/:submissionId',(req,res)=>{const id=uuid(req.params.id,'conversationId'),submissionId=uuid(req.params.submissionId,'submissionId');if(!batchReady(store.db))throw new ChatError(503,'BATCH_UPGRADE_REQUIRED');if(!store.conversation(id))throw new ChatError(404,'CONVERSATION_NOT_FOUND');const row=store.db.prepare('SELECT turn_id FROM chat_live_submissions WHERE id=? AND conversation_id=?').get(submissionId,id);if(!row)throw new ChatError(404,'RECEIPT_NOT_FOUND');const turn=store.turn(String(row.turn_id)),messages=store.turnMessages(turn.id);res.json({...store.receipt(turn),turn,submissionId,conversationId:id,bubbleIds:store.db.prepare('SELECT p.id FROM chat_live_segments p JOIN chat_live_submissions s ON s.parent_id=p.parent_id WHERE s.id=? ORDER BY p.position').all(submissionId).map(x=>x.id),messages});});
   // Resolve a lost acknowledgement without replaying a write or starting a model call.
   router.get('/conversations/:id/receipts/:clientMessageId',(req,res) => {
     const id=uuid(req.params.id,'conversationId'), clientId=uuid(req.params.clientMessageId,'clientMessageId');
@@ -55,7 +62,7 @@ export function chatRouter(service: ChatService, reauthorize?: (req: import('exp
   for(const method of ['patch','delete'] as const) router[method]('/messages/:id',(req,res)=>{
     const body=objectBody(req.body);if(!Number.isSafeInteger(body.baseRevision)||Number(body.baseRevision)<1)throw new ValidationError('Invalid baseRevision');
     if(method==='patch')text(body.content,'content',100000);
-    const id=uuid(req.params.id,'messageId');const result=reviseMessage(store.db,id,Number(body.baseRevision),uuid(body.requestId,'requestId'),method==='delete'?null:body.content as string);messageChanged?.(id);res.json(result);
+    const id=uuid(req.params.id,'messageId');const result=reviseSegment(store.db,id,Number(body.baseRevision),uuid(body.requestId,'requestId'),method==='delete'?null:body.content as string)??reviseMessage(store.db,id,Number(body.baseRevision),uuid(body.requestId,'requestId'),method==='delete'?null:body.content as string);messageChanged?.(id);res.json(result);
   });
   router.get('/turns/:id',async(req,res) => {
     const id = uuid(req.params.id,'turnId');

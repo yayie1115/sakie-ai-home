@@ -4,20 +4,20 @@ export function AuthenticationGate({children,presentation='default'}:{children:R
   const [status,setStatus]=useState<'loading'|'login'|'ready'|'error'>('loading');const[password,setPassword]=useState('');const[csrfToken,setCsrfToken]=useState('');const[error,setError]=useState('');const[busy,setBusy]=useState(false);
   useEffect(()=>{let active=true;const controller=new AbortController();fetchJson('/api/auth/session',{signal:controller.signal}).then(({response,body})=>{
     if(!active)return;if(response.ok){if(active){setCsrfToken(body.csrfToken);setStatus('ready');}}
-    else setStatus(response.status===401?'login':'error');
+    else {if(response.status===401)try{sessionStorage.removeItem('sakie-chat-pending-receipts');sessionStorage.removeItem('sakie-chat-composers');}catch{}setStatus(response.status===401?'login':'error');}
   }).catch(()=>{if(active)setStatus('error');});return()=>{active=false;controller.abort();};},[]);
   async function login(event:FormEvent){event.preventDefault();setBusy(true);setError('');try{
     const {response,body}=await fetchJson('/api/auth/login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
     if(!response.ok){setError(response.status===503?'身份配置尚未完成，请联系管理员。':response.status===429?'尝试过于频繁，请稍后再试。':'登录失败，请检查密码。');return;}
     setCsrfToken(body.csrfToken);setPassword('');setStatus('ready');
   }catch{setError('连接失败，请稍后重试。');}finally{setBusy(false);}}
-  async function logout(){setBusy(true);try{const {response}=await fetchJson('/api/auth/logout',{method:'POST',credentials:'same-origin',headers:{'X-CSRF-Token':csrfToken}});if(response.ok||response.status===401){try{sessionStorage.removeItem('sakie-chat-pending-receipts');}catch{}setCsrfToken('');setStatus('login');}else setError('退出失败，请重试。');}catch{setError('连接失败，请重试。');}finally{setBusy(false);}}
+  async function logout(){try{const drafts=JSON.parse(sessionStorage.getItem('sakie-chat-composers')??'{}');const pending=JSON.parse(sessionStorage.getItem('sakie-chat-pending-receipts')??'[]');if((Object.values(drafts).some((c:any)=>c?.draft||c?.pending?.length)||pending.length)&&!confirm('退出会清除此标签页的未提交草稿、暂存和待确认编号。请先确认发送状态；仍要退出吗？'))return;}catch{}setBusy(true);try{const {response}=await fetchJson('/api/auth/logout',{method:'POST',credentials:'same-origin',headers:{'X-CSRF-Token':csrfToken}});if(response.ok||response.status===401){try{sessionStorage.removeItem('sakie-chat-pending-receipts');sessionStorage.removeItem('sakie-chat-composers');}catch{}setCsrfToken('');setStatus('login');}else setError('退出失败，请重试。');}catch{setError('连接失败，请重试。');}finally{setBusy(false);}}
   const api:AuthenticatedApi=useCallback(async <T,>(path:string,init:RequestInit & {timeoutMs?:number}={})=>{
     const headers=new Headers(init.headers);
     if(init.body)headers.set('Content-Type','application/json');
     if(!['GET','HEAD'].includes(init.method??'GET'))headers.set('X-CSRF-Token',csrfToken);
     const {response,body}=await fetchJson(path,{...init,headers});
-    if(response.status===401){try{sessionStorage.removeItem('sakie-chat-pending-receipts');}catch{}setCsrfToken('');setStatus('login');}
+    if(response.status===401){try{sessionStorage.removeItem('sakie-chat-pending-receipts');sessionStorage.removeItem('sakie-chat-composers');}catch{}setCsrfToken('');setStatus('login');}
     if(!response.ok)throw new ApiError(response.status,body.error??'REQUEST_FAILED');
     return body as T;
   },[csrfToken]);

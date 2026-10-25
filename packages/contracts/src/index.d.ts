@@ -5,7 +5,8 @@ export interface SourceReference { recordId: string; revision: number; contentHa
 export type MemoryLayer = 'experience' | 'fact-cognition' | 'autobiography' | 'impression';
 export type MemoryChannel = 'automatic-facts' | 'primary-model-reflection';
 export interface MemoryProvenance { layer: MemoryLayer; channel: MemoryChannel; sources: readonly SourceReference[]; revision: number; verified: boolean; }
-export interface ClientMessage { clientMessageId: string; conversationId: string; content: string; replyToMemberId?: string; }
+export interface LiveChatSegment {id:string;revision:number;content:string;quote?:import('./chat-v11.js').V11QuoteTarget;}
+export interface ClientMessage {segments?:LiveChatSegment[]; clientMessageId: string; conversationId: string; content: string; replyToMemberId?: string; }
 export interface DurableMessageReceipt { messageId: string; turnId: string; turnSeq: number; durable: true; }
 /** accept MUST atomically persist message + task + outbox before resolving. IDs reused with different payloads MUST conflict. */
 export interface CloudMessageStore { accept(message: ClientMessage): Promise<DurableMessageReceipt>; }
@@ -35,7 +36,7 @@ export interface ChatParticipant { id: string; name: string; }
 export interface ChatConversationProfile { kind: 'private' | 'group'; members: string[]; }
 export interface ChatConversation { pinned?:boolean; id: string; title: string; createdAt: string; profile?: ChatConversationProfile | null; }
 export interface ChatTurn { id: string; conversationId: string; clientMessageId: string; turnSeq: number; status: ChatTurnStatus; replyToMemberId?: string | null; errorCode: string | null; createdAt: string; }
-export interface ChatMessage { id: string; turnId: string; messageSeq: number; role: 'user' | 'assistant'; content: string; createdAt: string; revision?: number; speakerId?: string | null; usage?: {inputTokens:number|null;outputTokens:number|null;cacheReadTokens:number|null;cacheWriteTokens:number|null}; }
+export interface ChatMessage {parentMessageId?:string;segmentPosition?:number;quote?:(import('./chat-v11.js').V11QuoteTarget & {unavailable?:boolean}); id: string; turnId: string; messageSeq: number; role: 'user' | 'assistant'; content: string; createdAt: string; revision?: number; speakerId?: string | null; usage?: {cacheRateApplicable?:boolean;inputTokens:number|null;outputTokens:number|null;cacheReadTokens:number|null;cacheWriteTokens:number|null}; }
 export interface ChatHistoryPage { items: ChatMessage[]; nextBefore: number | null; unresolvedTurn: ChatTurn | null; }
 export interface ChatConversationPage { items: (ChatConversation & {cursor:number})[]; nextBefore: number | null; }
 

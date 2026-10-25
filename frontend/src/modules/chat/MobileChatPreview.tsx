@@ -1,3 +1,5 @@
+import {V11SubmissionClient,DefinitiveSubmissionRejection} from './v11/submission';
+import type {V11Submission,V11SubmissionReceipt,V11PendingBubble} from '@sakie/contracts';
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import type { ChatConversation, ChatConversationPage, ChatHistoryPage, ChatMessage, ChatTurn, DurableMessageReceipt, ChatParticipant, ChatConversationProfile } from '@sakie/contracts';
@@ -12,19 +14,21 @@ const ConversationCreator=lazy(()=>import('./v11/ConversationCreator').then(m=>(
 const ConversationDetailsFrame=lazy(()=>import('./v11/ConversationDetailsFrame').then(m=>({default:m.ConversationDetailsFrame})));
 const MemoryPanel=lazy(()=>import('./v11/MemoryPanel').then(m=>({default:m.MemoryPanel})));
 const base = '/api/chat';
-type Settings={configured:boolean;maxMessageChars:number;model?:string;participants?:ChatParticipant[];conversationProfilesEnabled?:boolean};
-type PendingSend={clientMessageId:string;content?:string;time:number;replyToMemberId?:string};
+type Settings={configured:boolean;maxMessageChars:number;model?:string;participants?:ChatParticipant[];conversationProfilesEnabled?:boolean;batchEnabled?:boolean};
+type PendingSend={batch?:V11PendingBubble[];clientMessageId:string;content?:string;time:number;replyToMemberId?:string};
 const receiptKey='sakie-chat-pending-receipts';
 function readPending():Map<string,PendingSend>{
     try { const rows=JSON.parse(sessionStorage.getItem(receiptKey)??'[]');
         if(!Array.isArray(rows))return new Map();
-        return new Map(rows.slice(0,64).filter(row=>Array.isArray(row)&&row.length===2&&typeof row[0]==='string'&&uuid.test(row[0])&&row[1]&&typeof row[1].clientMessageId==='string'&&uuid.test(row[1].clientMessageId)&&Number.isFinite(row[1].time)).map(([id,p])=>[id,{clientMessageId:p.clientMessageId,time:p.time,replyToMemberId:typeof p.replyToMemberId==='string'?p.replyToMemberId:undefined}]));
+        return new Map(rows.slice(0,64).filter(row=>Array.isArray(row)&&row.length===2&&typeof row[0]==='string'&&uuid.test(row[0])&&row[1]&&typeof row[1].clientMessageId==='string'&&uuid.test(row[1].clientMessageId)&&Number.isFinite(row[1].time)).map(([id,p])=>[id,{clientMessageId:p.clientMessageId,time:p.time,...(Array.isArray(p.batch)&&p.batch.length<=16&&p.batch.every((b:V11PendingBubble)=>b&&uuid.test(b.id)&&typeof b.content==='string'&&b.content.length<=12000&&Number.isSafeInteger(b.revision))?{batch:p.batch}:{}),replyToMemberId:typeof p.replyToMemberId==='string'?p.replyToMemberId:undefined}]));
     }catch{return new Map();}
 }
-function rememberPending(pending:Map<string,PendingSend>){
-    // IDs only: never persist transcripts, drafts, cookies, credentials or model output in web storage.
-    try { if(!pending.size)sessionStorage.removeItem(receiptKey);else sessionStorage.setItem(receiptKey,JSON.stringify([...pending].map(([id,p])=>[id,{clientMessageId:p.clientMessageId,time:p.time,replyToMemberId:p.replyToMemberId}]))); }catch{/* Private browsing/storage quota must not prevent sending. */}
+function rememberPending(pending:Map<string,PendingSend>,strict=false){
+    // Legacy receipts store IDs only; explicit batch recovery keeps unsent text in this tab, cleared on logout/401. Never store credentials/model output.
+    try { if(!pending.size)sessionStorage.removeItem(receiptKey);else sessionStorage.setItem(receiptKey,JSON.stringify([...pending].map(([id,p])=>[id,{clientMessageId:p.clientMessageId,time:p.time,replyToMemberId:p.replyToMemberId,...(p.batch?{batch:p.batch}:{})}]))); }catch(e){if(strict)throw e;}
 }
+const draftsKey='sakie-chat-composers';
+function readComposers():Record<string,Composer>{try{const value=JSON.parse(sessionStorage.getItem(draftsKey)??'{}');if(!value||typeof value!=='object'||Array.isArray(value))return {};return Object.fromEntries(Object.entries(value).slice(0,64).filter(([id,c])=>uuid.test(id)&&c&&typeof c==='object').map(([id,c])=>{const v=c as Composer;return [id,{...emptyComposer(),draft:typeof v.draft==='string'?v.draft.slice(0,12000):'',pending:Array.isArray(v.pending)?v.pending.filter(m=>m&&uuid.test(m.id)&&m.pending&&m.author==='me'&&Number.isInteger(m.version)&&m.version>=0&&m.version<m.versions?.length&&Number.isFinite(m.time)&&Array.isArray(m.versions)&&m.versions.every(t=>typeof t==='string'&&t.length<=12000)).slice(0,16):[],scroll:Number.isFinite(v.scroll)?v.scroll:0}];}));}catch{return {};}}
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const describe = (e: unknown) => e instanceof ApiError && [401, 403].includes(e.status) ? '没有访问权限，请重新登录。' : '记录暂时无法加载，请检查连接后重试。';
 function roomOf(c: ChatConversation, participants:readonly ChatParticipant[]): Room { return { id: c.id, kind: c.profile?.kind??'private', name: c.title, members: c.profile?.members??[], remarks: Object.fromEntries((c.profile?.members??[]).map(id=>[id,participants.find(a=>a.id===id)?.name??'未命名 AI'])), activity: Date.parse(c.createdAt), pinned: false, rules: { mixed: false, mentions: false, limited: true } }; }
@@ -39,8 +43,10 @@ export function MobileChatPreview({ live = false,embedded=false,uiReady=false }:
     const [messages, setMessages] = useState<ChatMessage[]>([]), [loadedFor, setLoadedFor] = useState<string | null>(null), [before, setBefore] = useState<number | null>(null), [historyError, setHistoryError] = useState(''), [historyBusy, setHistoryBusy] = useState(false);
     const [roomMenu,setRoomMenu]=useState<string|null>(null),[pinned,setPinned]=useState<Record<string,boolean>>({});
 
-    const [query, setQuery] = useState(''), [notice, setNotice] = useState(''), [drawer, setDrawer] = useState(false), [dark, setDark] = useState(false);
-    const [composers, setComposers] = useState<Record<string, Composer>>({}), [scrolled, setScrolled] = useState<Record<string, boolean>>({});
+    const [query, setQuery] = useState(''),[searchQuery,setSearchQuery]=useState(''), [notice, setNotice] = useState(''), [drawer, setDrawer] = useState(false), [dark, setDark] = useState(false);
+    const [composers, setComposers] = useState<Record<string, Composer>>(readComposers), [scrolled, setScrolled] = useState<Record<string, boolean>>({});
+    const composersRef=useRef(composers);composersRef.current=composers;
+    useEffect(()=>{if(!live)return;const timer=setTimeout(()=>{try{sessionStorage.setItem(draftsKey,JSON.stringify(composers));}catch{setNotice('暂存无法保存在本标签页，请勿刷新；正式提交前会再次检查。');}},300);return()=>clearTimeout(timer);},[live,composers]);
     const [settings, setSettings] = useState<Settings>({configured:false,maxMessageChars:12000});
     const [turns,setTurns] = useState<Record<string,ChatTurn|null>>({});
     const [memoryOpen,setMemoryOpen]=useState(false);
@@ -70,7 +76,7 @@ export function MobileChatPreview({ live = false,embedded=false,uiReady=false }:
     const loadRooms = useCallback((beforeCursor?: number):Promise<void> => {
         const serial=++listSerial.current;
         const run=async()=>{setListLoading(true);setListError('');try{
-            const path=base+'/conversations?limit=50'+(beforeCursor?'&before='+beforeCursor:'')+(query?'&q='+encodeURIComponent(query):'');
+            const path=base+'/conversations?limit=50'+(beforeCursor?'&before='+beforeCursor:'')+(searchQuery?'&q='+encodeURIComponent(searchQuery):'');
             const configRequest=configCache.current?Promise.resolve(configCache.current):api<Settings>(base+'/config');
             const [config,page]=live?await Promise.all([configRequest,api<ChatConversationPage>(path)]):await(async()=>{
                 const config=await configRequest;if(config.configured!==false)throw Error('M0 model boundary mismatch');
@@ -79,13 +85,14 @@ export function MobileChatPreview({ live = false,embedded=false,uiReady=false }:
             if(serial!==listSerial.current)return;
             configCache.current=config;setSettings(config);
             setPinned(old=>({...old,...Object.fromEntries(page.items.map(c=>[c.id,!!c.pinned]))}));
-            setRooms(old=>beforeCursor?[...old,...page.items.filter(c=>!old.some(r=>r.id===c.id))]:[...page.items,...old.filter(c=>!query&&c.id===selectedRef.current&&!page.items.some(r=>r.id===c.id))]);
+            setRooms(old=>beforeCursor?[...old,...page.items.filter(c=>!old.some(r=>r.id===c.id))]:[...page.items,...old.filter(c=>!searchQuery&&c.id===selectedRef.current&&!page.items.some(r=>r.id===c.id))]);
             setNext(page.nextBefore);
         }catch(e){if(serial===listSerial.current)setListError(describe(e));}finally{if(serial===listSerial.current)setListLoading(false);}};
         listFlight.current=run().finally(()=>{listFlight.current=null;});return listFlight.current;
-    },[api,live,query]);
+    },[api,live,searchQuery]);
+    useEffect(()=>{const timer=setTimeout(()=>setSearchQuery(query),250);return()=>clearTimeout(timer);},[query]);
     useEffect(()=>{void loadRooms();},[loadRooms]);
-    useEffect(()=>{if(embedded&&location.pathname==='/chat'){setRefreshToken(n=>n+1);void loadRooms();}},[embedded,location.pathname]);
+
     const mergeMessages=useCallback((id:string,rows:ChatMessage[])=>{
         const saved=cache.current.get(id)??{items:[],before:null};
         const items=[...new Map([...saved.items,...rows].map(m=>[m.id,m])).values()].sort((a,b)=>a.messageSeq-b.messageSeq);
@@ -96,17 +103,17 @@ export function MobileChatPreview({ live = false,embedded=false,uiReady=false }:
     const reconcilePending=useCallback(async(id:string,signal?:AbortSignal)=>{
         const p=pendingRequests.get(id);if(!p)return;
         try{
-            const result=await api<{turn:ChatTurn;messages:ChatMessage[]}>(base+'/conversations/'+id+'/receipts/'+p.clientMessageId,{signal});
+            const result=await api<{turn:ChatTurn;messages:ChatMessage[]}>(base+'/conversations/'+id+(p.batch?'/batch-receipts/':'/receipts/')+p.clientMessageId,{signal});
             if(signal?.aborted)return;
             if(pendingRequests.get(id)?.clientMessageId!==p.clientMessageId)return;
-            pendingRequests.delete(id);rememberPending(pendingRequests);
             mergeMessages(id,result.messages);setTurns(old=>({...old,[id]:result.turn}));
-            setComposers(old=>{const c=old[id];return c&&p.content===c.draft?{...old,[id]:{...c,draft:''}}:old;});
+            const c=composersRef.current[id];if(c){const next={...composersRef.current,[id]:{...c,...(p.batch?{pending:c.pending.filter(m=>!p.batch!.some(b=>b.id===m.id))}:p.content===c.draft?{draft:''}:{})}};sessionStorage.setItem(draftsKey,JSON.stringify(next));setComposers(next);}
+            const remaining=new Map(pendingRequests);remaining.delete(id);rememberPending(remaining,!!p.batch);pendingRequests.delete(id);
             if(selectedRef.current===id)setNotice('消息已确认保存，已恢复服务端状态。');
         }catch(e){
             if(signal?.aborted)return;
             if(e instanceof ApiError&&e.code==='RECEIPT_NOT_FOUND'){
-                if(selectedRef.current===id)setNotice(p.content?'尚未查到保存回执；可用同一编号重试发送。':'上次发送尚未查到回执；请重新输入原消息后重试，将沿用原编号。');
+                if(selectedRef.current===id)setNotice(p.batch?'尚未查到批次回执，暂存已保留，可用相同编号重试。':p.content?'尚未查到保存回执；可用同一编号重试发送。':'上次发送尚未查到回执；请重新输入原消息后重试，将沿用原编号。');
             }else if(e instanceof ApiError&&[401,403].includes(e.status))throw e;
         }
     },[api,mergeMessages,pendingRequests]);
@@ -188,7 +195,7 @@ export function MobileChatPreview({ live = false,embedded=false,uiReady=false }:
         }}};
         void poll();return()=>{active=false;controller.abort();clearTimeout(timer);};
     },[api,live,online,visible,selected,turn?.id,turn?.status,refreshToken,mergeMessages]);
-    useEffect(()=>{if(!live)return;const warn=(event:BeforeUnloadEvent)=>{if(pendingRequests.size||Object.values(composers).some(c=>c.draft)){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[live,composers]);
+    useEffect(()=>{if(!live)return;const warn=(event:BeforeUnloadEvent)=>{try{sessionStorage.setItem(draftsKey,JSON.stringify(composersRef.current));}catch{}if(pendingRequests.size||Object.values(composers).some(c=>c.draft||c.pending.length)){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[live,composers]);
     function writeError(e:unknown){return e instanceof ApiError ? '请求未完成：'+e.code+'。请刷新状态后重试。' : '连接中断，结果未知。保留页面，重试会复用同一编号。';}
     async function createConversation(kind:ChatConversationProfile['kind'],members:string[],title:string){
         if(!live||sending.current||!settings.conversationProfilesEnabled)return;
@@ -201,7 +208,17 @@ export function MobileChatPreview({ live = false,embedded=false,uiReady=false }:
             pendingCreate.current.delete(key);setRooms(old=>[c,...old.filter(r=>r.id!==c.id)]);open(c.id);
         }catch(e){throw Error(writeError(e));}finally{sending.current=false;setWriteBusy(false);}
     }
+    function stageLive(){if(!selected||sending.current||pendingRequests.has(selected)||!composer.draft.trim())return;if(composer.pending.length>=16){setNotice('每批最多暂存16段，请先提交当前批次。');return;}if(composer.pending.reduce((n,m)=>n+m.versions[m.version].length,0)+composer.draft.length+2*composer.pending.length>settings.maxMessageChars){setNotice('这批文字已超过消息长度限制，请分批提交。');return;}const id=crypto.randomUUID();setComposers(old=>({...old,[selected]:{...(old[selected]??emptyComposer()),draft:'',quote:undefined,pending:[...(old[selected]?.pending??[]),{id,turnId:id,author:'me',versions:[composer.draft],version:0,time:Date.now(),pending:true,...(composer.quote?{quote:composer.quote}:{})}]}}));}
+    async function sendBatch(){if(!selected||sending.current||unresolved||!online||!settings.configured||!settings.batchEnabled||!replyMemberId)return;const id=selected,previous=pendingRequests.get(id);const bubbles:V11PendingBubble[]=previous?.batch??composer.pending.map(m=>({id:m.id,revision:m.versions.length,content:m.versions[m.version],...(m.quote?.source?{quote:{...m.quote.source,selectedText:m.quote.text}}:{})}));if(!bubbles.length)return;sending.current=true;setWriteBusy(true);
+      const client=new V11SubmissionClient(async request=>{try{return await api<V11SubmissionReceipt>(base+'/conversations/'+id+'/batches',{method:'POST',body:JSON.stringify({submissionId:request.submissionId,segments:request.bubbles,replyToMemberId:previous?.replyToMemberId??replyMemberId})});}catch(e){if(e instanceof ApiError&&([400,413,429].includes(e.status)||['QUOTE_NOT_CURRENT','QUOTE_SCOPE_DENIED'].includes(e.code)))throw new DefinitiveSubmissionRejection('本批尚未保存，内容仍在暂存区，请检查长度或稍后重试。');throw e;}},{
+       read:()=>{const p=pendingRequests.get(id);return p?.batch?{schemaVersion:1,conversationId:id,submissionId:p.clientMessageId,bubbles:p.batch}:null;},
+       write:request=>{pendingRequests.set(id,{clientMessageId:request.submissionId,batch:request.bubbles,time:previous?.time??Date.now(),replyToMemberId:previous?.replyToMemberId??replyMemberId});rememberPending(pendingRequests,true);},
+       clear:()=>{const next=new Map(pendingRequests);next.delete(id);rememberPending(next,true);pendingRequests.delete(id);}
+      });
+      try{sessionStorage.setItem(draftsKey,JSON.stringify(composersRef.current));const receipt=await client.submit(id,bubbles);const current=composersRef.current[id]??emptyComposer(),next={...composersRef.current,[id]:{...current,pending:current.pending.filter(m=>!receipt.bubbleIds.includes(m.id))}};sessionStorage.setItem(draftsKey,JSON.stringify(next));setComposers(next);client.confirm(receipt);const saved=(receipt as V11SubmissionReceipt&{messages?:ChatMessage[]}).messages;if(saved)mergeMessages(id,saved);setTurns(old=>({...old,[id]:receipt.turn}));setNotice('整批消息已确认保存。');}catch(e){setNotice(e instanceof DefinitiveSubmissionRejection||e instanceof Error&&/^(无法持久|服务端持久|待确认)/.test(e.message)?e.message:writeError(e));await reconcilePending(id).catch(()=>{});}finally{sending.current=false;setWriteBusy(false);}
+    }
     async function send(){
+        if(composer.pending.length||pendingRequests.get(selected??'')?.batch){await sendBatch();return;}
         if(!live||!online||historyBusy||!selected||loadedFor!==selected||sending.current||!settings.configured||!selectedConversation||(!!selectedConversation.profile&&!replyMemberId))return;
         const id=selected;let request=pendingRequests.get(id);
         if(!request){if(unresolved||!composer.draft.trim())return;request={clientMessageId:crypto.randomUUID(),content:composer.draft,time:Date.now(),replyToMemberId:replyMemberId||undefined};pendingRequests.set(id,request);}
@@ -235,7 +252,7 @@ export function MobileChatPreview({ live = false,embedded=false,uiReady=false }:
     else
         navigate(route, { replace: true }); }
     const conversation = rooms.find(r => r.id === selected), room = useMemo(()=>conversation?roomOf(conversation,settings.participants??[]):undefined,[conversation,settings.participants]);
-    const savedDisplay=useMemo(()=>messages.map(m => ({ id: m.id, turnId: m.turnId, author: m.role === 'user' ? 'me' : m.speakerId??'unattributed', versions: [m.content], version: 0, time: Date.parse(m.createdAt), usage:m.usage,sourceRef: { messageId: m.id, revision: m.revision ?? 1 } })),[messages]);
+    const savedDisplay=useMemo(()=>messages.map(m => ({ id: m.id, turnId: m.turnId, author: m.role === 'user' ? 'me' : m.speakerId??'unattributed', versions: [m.content], version: 0, time: Date.parse(m.createdAt), usage:m.usage,...(m.quote?{quote:{id:m.quote.messageId,author:'引用消息',text:m.quote.unavailable?'来源已变化或不可用':m.quote.selectedText,unavailable:m.quote.unavailable,source:{conversationId:m.quote.conversationId,messageId:m.quote.messageId,revision:m.quote.revision,bubbleId:m.quote.bubbleId}}}:{}),sourceRef: { messageId: m.id, revision: m.revision ?? 1 } })),[messages]);
     const display:Message[]=[...savedDisplay];
     if(live&&selected){
         const waiting=pendingRequests.get(selected);
@@ -256,9 +273,9 @@ export function MobileChatPreview({ live = false,embedded=false,uiReady=false }:
     </div><footer>{live ? settings.conversationProfilesEnabled?'已保存会话':'会话成员功能待数据库扩展升级' : environment.fixture ? '自动化测试夹具 · 合成记录' : 'M0-2 独立只读测试'}<button onClick={() => void loadRooms()} disabled={listLoading}>刷新列表</button></footer>
    </aside>
    <div className="v11-chat">{room && loadedFor === room.id ? <Timeline key={room.id} room={room} messages={display} composer={composers[room.id] ?? emptyComposer()} onCompose={patch => { setComposers(old => ({ ...old, [room.id]: { ...(old[room.id] ?? emptyComposer()), ...patch } })); if ('scroll' in patch)
-        setScrolled(old => ({ ...old, [room.id]: true })); }} onStage={() => setNotice('暂存与发送尚未开放')} onSubmit={() => live ? void send() : setNotice('发送尚未开放')} onPending={() => { }} onMessages={() => setNotice('消息修改尚未接通')} onBack={back} onDetails={() => navigate(location.pathname + location.search + '&view=details')} notice={setNotice} onOperate={live?async(m,action,value)=>{if(!selected||unresolved)throw Error('请等待当前回复结束');if(!['edit','delete'].includes(action))throw Error('该正式消息操作尚未开放');if(action==='delete'&&!confirm('删除这条消息？原始记录保留，相关记忆来源将失效。'))return;await api(base+'/messages/'+m.id,{method:action==='edit'?'PATCH':'DELETE',body:JSON.stringify({baseRevision:m.sourceRef?.revision??1,requestId:crypto.randomUUID(),...(action==='edit'?{content:value}:{})})});cache.current.delete(selected);setRefreshToken(n=>n+1);}:undefined} onJumped={() => { }} linked locked={live&&(writeBusy||!!pendingRequests.get(selected??'')?.content)} live={live?{disabled:writeBusy||historyBusy||!online||!settings.configured||!selectedConversation||(!!selectedConversation.profile&&!replyMemberId)||(!pendingSend&&(!composer.draft.trim()||unresolved))||(pendingSend&&!pendingRequests.get(selected??'')?.content&&!composer.draft.trim()),maxLength:settings.maxMessageChars,status:statusText,replyPicker:room.kind==='group'?<div className="v11-setting"><label>本次回复成员 <select aria-label="本次回复成员" disabled={writeBusy||pendingSend||unresolved} value={replyMemberId} onChange={e=>setResponders(old=>({...old,[room.id]:e.target.value}))}><option value="">请选择成员</option>{room.members.map(id=><option key={id} value={id}>{room.remarks[id]}</option>)}</select><small>手动单次回复 · 共用模型 · 自主调度及角色人格未配置</small></label></div>:undefined}:undefined} onRead={copySource} m0={{ modelLabel: live?(settings.model||'模型未配置'):'模型未启用', onNavigation: () => setDrawer(d => !d), initialLatest: !scrolled[room.id], hasEarlier: before !== null, loadEarlier: () => historyPage(true), loadingEarlier: historyBusy }}/> : <div className="m0-history-state">{selected && <button className="v11-text-button" onClick={back}>〈 返回会话列表</button>}<p role="status">{!selected ? '选择一个会话查看已保存记录' : historyError || (!room ? '正在查找会话；可返回列表加载更多' : '正在读取聊天记录…')}</p>{historyError && <button onClick={() => void historyPage()}>重试读取记录</button>}</div>}
+        setScrolled(old => ({ ...old, [room.id]: true })); }} onStage={stageLive} onSubmit={() => live ? void send() : setNotice('发送尚未开放')} onPending={pending=>{if(selected&&!pendingRequests.has(selected))setComposers(old=>({...old,[selected]:{...(old[selected]??emptyComposer()),pending}}));}} onMessages={() => setNotice('消息修改尚未接通')} onBack={back} onDetails={() => navigate(location.pathname + location.search + '&view=details')} notice={setNotice} active={!embedded||location.pathname==='/chat'&&!details&&!memoryOpen} onOperate={live?async(m,action,value)=>{if(!selected||unresolved)throw Error('请等待当前回复结束');if(!['edit','delete'].includes(action))throw Error('该正式消息操作尚未开放');if(action==='delete'&&!confirm('删除这条消息？原始记录保留，相关记忆来源将失效。'))return;await api(base+'/messages/'+m.id,{method:action==='edit'?'PATCH':'DELETE',body:JSON.stringify({baseRevision:m.sourceRef?.revision??1,requestId:crypto.randomUUID(),...(action==='edit'?{content:value}:{})})});cache.current.delete(selected);setRefreshToken(n=>n+1);}:undefined} onJumped={() => { }} linked locked={live&&(writeBusy||!!pendingRequests.get(selected??'')?.content)} live={live?{disabled:writeBusy||historyBusy||!online||!settings.configured||!selectedConversation||(!!selectedConversation.profile&&!replyMemberId)||(!pendingSend&&(!composer.draft.trim()&&!composer.pending.length||unresolved))||(pendingSend&&!pendingRequests.get(selected??'')?.content&&!pendingRequests.get(selected??'')?.batch&&!composer.draft.trim()),batchEnabled:settings.batchEnabled,maxLength:settings.maxMessageChars,status:statusText,replyPicker:room.kind==='group'?<div className="v11-setting"><label>本次回复成员 <select aria-label="本次回复成员" disabled={writeBusy||pendingSend||unresolved} value={replyMemberId} onChange={e=>setResponders(old=>({...old,[room.id]:e.target.value}))}><option value="">请选择成员</option>{room.members.map(id=><option key={id} value={id}>{room.remarks[id]}</option>)}</select><small>手动单次回复 · 共用模型 · 自主调度及角色人格未配置</small></label></div>:undefined}:undefined} onRead={copySource} m0={{ modelLabel: live?(settings.model||'模型未配置'):'模型未启用', onNavigation: () => setDrawer(d => !d), initialLatest: !scrolled[room.id], hasEarlier: before !== null, loadEarlier: () => historyPage(true), loadingEarlier: historyBusy }}/> : <div className="m0-history-state">{selected && <button className="v11-text-button" onClick={back}>〈 返回会话列表</button>}<p role="status">{!selected ? '选择一个会话查看已保存记录' : historyError || (!room ? '正在查找会话；可返回列表加载更多' : '正在读取聊天记录…')}</p>{historyError && <button onClick={() => void historyPage()}>重试读取记录</button>}</div>}
 
-    {live&&selected&&loadedFor===selected&&(pendingSend||!!turn&&turn.status!=='succeeded'||!!historyError)&&<div className="live-chat-status" role="status">{statusText}{pendingSend&&<button disabled={writeBusy||historyBusy||!online||(!pendingRequests.get(selected??'')?.content&&!composer.draft.trim())} onClick={()=>void send()}>确认或重发同一请求</button>}{turn&&['failed','unknown'].includes(turn.status)&&<button disabled={writeBusy||!online||!settings.configured} onClick={()=>void retryReply()}>重试回复{turn.status==='unknown'?'（可能再次计费）':''}</button>}<button disabled={historyBusy||writeBusy||!online} onClick={()=>void historyPage()}>刷新状态</button></div>}
+    {live&&selected&&loadedFor===selected&&(pendingSend||!!turn&&turn.status!=='succeeded'||!!historyError)&&<div className="live-chat-status" role="status">{statusText}{pendingSend&&<button disabled={writeBusy||historyBusy||!online||(!pendingRequests.get(selected??'')?.content&&!pendingRequests.get(selected??'')?.batch&&!composer.draft.trim())} onClick={()=>void send()}>确认或重发同一请求</button>}{turn&&['failed','unknown'].includes(turn.status)&&<button disabled={writeBusy||!online||!settings.configured} onClick={()=>void retryReply()}>重试回复{turn.status==='unknown'?'（可能再次计费）':''}</button>}<button disabled={historyBusy||writeBusy||!online} onClick={()=>void historyPage()}>刷新状态</button></div>}
     {historyError && loadedFor === room?.id && !details && <p role="alert" className="m0-history-error">{historyError}</p>}
 
     {live&&room&&memoryOpen&&<Suspense fallback={<p role="status">正在打开记忆…</p>}><MemoryPanel key={room.id} conversationId={room.id} participants={settings.participants??[]} onClose={()=>setMemoryOpen(false)}/></Suspense>}
