@@ -18,6 +18,8 @@ function Bubble({m,room,selected,onOpen,onQuoteJump,children}:{m:Message;room:Ro
 }
 export function Timeline(props:Props){
  const {room,messages,composer,onCompose}=props;const readOnly=!!props.m0&&!props.live;const pinned=useRef(props.m0?.initialLatest??false);const input=useRef<HTMLTextAreaElement>(null);const earlierAnchor=useRef<{id:string;offset:number}|null>(null);
+ const scrollSave=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),composeRef=useRef(onCompose);composeRef.current=onCompose;
+ useEffect(()=>()=>{if(scrollSave.current)clearTimeout(scrollSave.current);},[]);
  const scroll=useRef<HTMLDivElement>(null); const oldScroll=useRef<number|null>(null);
  const [menu,setMenu]=useState<string|null>(null); const [partialQuote,setPartialQuote]=useState('');
  const [edit,setEdit]=useState<{id:string;text:string}|null>(null); const [count,setCount]=useState(props.m0?Number.MAX_SAFE_INTEGER:30);
@@ -34,7 +36,7 @@ export function Timeline(props:Props){
  function open(m:Message){if(m.delivery)return;oldScroll.current=scroll.current?.scrollTop??null;const selection=window.getSelection()?.toString().trim()??'';setPartialQuote(textOf(m).includes(selection)?selection:'');setMenu(m.id);setEdit(null);}
  function update(id:string,change:(m:Message)=>Message){if(composer.pending.some(m=>m.id===id))props.onPending(composer.pending.map(m=>m.id===id?change(m):m));else props.onMessages(messages.map(m=>m.id===id?change(m):m));}
  function action(m:Message,name:string){
-   if((readOnly||props.live)&&name!=='copy'){props.notice('此操作尚未接通，M0-2不会修改消息或调用模型');return;}
+   if((readOnly||props.live)&&name!=='copy'){props.notice('此操作尚未接通，不会修改已保存消息');return;}
    if(props.locked&&(m.pending||props.onOperate)){props.notice('提交结果尚未确认，不能改动原快照');return;}
    if(props.linked&&!m.pending&&!props.onOperate&&!['copy','quote'].includes(name)){props.notice('正式消息编辑、删除和版本接口尚未接入');return;}
    if(props.linked&&props.onOperate&&m.pending&&name==='quote'){props.notice('待提交气泡尚无可核验的服务端来源，请先提交');return;}
@@ -57,15 +59,15 @@ export function Timeline(props:Props){
    }
    if(name==='up'||name==='down'){const list=[...composer.pending];const i=list.findIndex(x=>x.id===m.id),j=i+(name==='up'?-1:1);if(j>=0&&j<list.length){[list[i],list[j]]=[list[j],list[i]];props.onPending(list);}}
  }
- const bottom=()=>requestAnimationFrame(()=>{if(scroll.current)scroll.current.scrollTop=scroll.current.scrollHeight;});
+ const bottom=()=>requestAnimationFrame(()=>{pinned.current=true;if(scroll.current)scroll.current.scrollTop=scroll.current.scrollHeight;});
  function stage(){props.onStage();bottom();}
  return <>
    <header className="v11-chat-head">{props.m0&&<div className="m0-header-actions"><button className="v11-icon" onClick={props.m0.onNavigation} aria-label="打开主导航">☰</button><button className="v11-back" onClick={props.onBack} aria-label="返回会话列表">‹</button></div>}{!props.m0&&<button className="v11-back" onClick={props.onBack} aria-label="返回会话列表">〈 返回</button>}<div className="v11-chat-title"><strong>{room.name}</strong>{room.kind==='private'&&<small>{props.m0?.modelLabel??'模型信息未加载'}</small>}</div><button className="v11-icon" onClick={props.onDetails} aria-label="聊天详情">···</button></header>
-   <div ref={scroll} className={`v11-timeline ${menu?'selecting':''}`} aria-label="聊天时间线" onScroll={e=>{const el=e.currentTarget;if(readOnly&&el.clientHeight===0)return;pinned.current=el.scrollHeight-el.scrollTop-el.clientHeight<48;onCompose({scroll:el.scrollTop});}} onClick={e=>{if(menu&&!(e.target as HTMLElement).closest('.chosen'))close();}}>
+   <div ref={scroll} className={`v11-timeline ${menu?'selecting':''}`} aria-label="聊天时间线" onScroll={e=>{const el=e.currentTarget;if(readOnly&&el.clientHeight===0)return;pinned.current=el.scrollHeight-el.scrollTop-el.clientHeight<48;const top=el.scrollTop;if(scrollSave.current)clearTimeout(scrollSave.current);scrollSave.current=setTimeout(()=>composeRef.current({scroll:top}),120);}} onClick={e=>{if(menu&&!(e.target as HTMLElement).closest('.chosen'))close();}}>
      {props.m0?.hasEarlier&&<button className="v11-text-button" disabled={props.m0.loadingEarlier} onClick={()=>void earlier()}>{props.m0.loadingEarlier?'正在读取更早记录…':'加载更早消息'}</button>}
      {messages.length>count&&<button className="v11-text-button" onClick={()=>{const el=scroll.current;const before=el?.scrollHeight??0;setCount(n=>n+30);requestAnimationFrame(()=>{if(el)el.scrollTop+=el.scrollHeight-before;});}}>加载更早消息</button>}
      <p className="v11-date">{props.live?'已保存聊天 · 长期记忆暂未接入':readOnly?'独立测试库 · 已保存记录':'合成数据 · 不连接真实聊天'}</p>
-     {all.slice(Math.max(0,messages.length-count)).map((m,i,array)=><Bubble key={m.id} m={m} room={room} selected={menu===m.id} onOpen={()=>open(m)} onQuoteJump={id=>{if(!messages.some(x=>x.id===id)){props.notice('原消息已从演示会话移除');return;}const target=messages.find(x=>x.id===id)!;void (async()=>{if(props.onRead)await props.onRead(target);setCount(messages.length);requestAnimationFrame(()=>scroll.current?.querySelector(`[data-message-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'center'}));})().catch(e=>props.notice((e as Error).message));}}>
+     {all.slice(Math.max(0,messages.length-count)).map((m,i,array)=><Bubble key={m.id} m={m} room={room} selected={menu===m.id} onOpen={()=>open(m)} onQuoteJump={id=>{if(!messages.some(x=>x.id===id)){props.notice('原消息不可用，请刷新后重试');return;}const target=messages.find(x=>x.id===id)!;void (async()=>{if(props.onRead)await props.onRead(target);setCount(messages.length);requestAnimationFrame(()=>scroll.current?.querySelector(`[data-message-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'center'}));})().catch(e=>props.notice((e as Error).message));}}>
        {menu===m.id&&<div className="v11-bubblebar" aria-label="消息操作">
          {edit?.id===m.id?<><textarea aria-label="编辑消息" value={edit.text} onChange={e=>setEdit({...edit,text:e.target.value})}/><button disabled={!edit.text.trim()} onClick={()=>{const value=props.onOperate?edit.text:edit.text.trim();if(props.linked&&props.onOperate&&!m.pending){void props.onOperate(m,'edit',value).then(close).catch(e=>props.notice((e as Error).message));return;}update(m.id,x=>({...x,versions:[...x.versions,value],version:x.versions.length}));close();}}>保存</button><button onClick={close}>取消</button></>:<>
            {(['copy','edit','delete','quote'] as const).map((a,i)=><button key={a} disabled={(readOnly||!!props.live)&&a!=='copy'} title={readOnly&&a!=='copy'?'M0-2尚未接通':undefined} onClick={()=>action(m,a)}>{['复制','编辑','删除','引用'][i]}</button>)}

@@ -1,6 +1,4 @@
-import {ConversationCreator} from './v11/ConversationCreator';
-import {ConversationDetailsFrame} from './v11/ConversationDetailsFrame';
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import type { ChatConversation, ChatConversationPage, ChatHistoryPage, ChatMessage, ChatTurn, DurableMessageReceipt, ChatParticipant, ChatConversationProfile } from '@sakie/contracts';
 import { ApiError, useApi, useSessionActions } from '../../app/api';
@@ -10,7 +8,22 @@ import { emptyComposer, type Composer, type Message, type Room } from './v11/sta
 import { M0EnvironmentContext } from './m0/M0Boundary';
 import './group-chat-preview.css';
 import './m0/mobile-chat.css';
+const ConversationCreator=lazy(()=>import('./v11/ConversationCreator').then(m=>({default:m.ConversationCreator})));
+const ConversationDetailsFrame=lazy(()=>import('./v11/ConversationDetailsFrame').then(m=>({default:m.ConversationDetailsFrame})));
 const base = '/api/chat';
+type Settings={configured:boolean;maxMessageChars:number;model?:string;participants?:ChatParticipant[];conversationProfilesEnabled?:boolean};
+type PendingSend={clientMessageId:string;content?:string;time:number;replyToMemberId?:string};
+const receiptKey='sakie-chat-pending-receipts';
+function readPending():Map<string,PendingSend>{
+    try { const rows=JSON.parse(sessionStorage.getItem(receiptKey)??'[]');
+        if(!Array.isArray(rows))return new Map();
+        return new Map(rows.slice(0,64).filter(row=>Array.isArray(row)&&row.length===2&&typeof row[0]==='string'&&uuid.test(row[0])&&row[1]&&typeof row[1].clientMessageId==='string'&&uuid.test(row[1].clientMessageId)&&Number.isFinite(row[1].time)).map(([id,p])=>[id,{clientMessageId:p.clientMessageId,time:p.time,replyToMemberId:typeof p.replyToMemberId==='string'?p.replyToMemberId:undefined}]));
+    }catch{return new Map();}
+}
+function rememberPending(pending:Map<string,PendingSend>){
+    // IDs only: never persist transcripts, drafts, cookies, credentials or model output in web storage.
+    try { if(!pending.size)sessionStorage.removeItem(receiptKey);else sessionStorage.setItem(receiptKey,JSON.stringify([...pending].map(([id,p])=>[id,{clientMessageId:p.clientMessageId,time:p.time,replyToMemberId:p.replyToMemberId}]))); }catch{/* Private browsing/storage quota must not prevent sending. */}
+}
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const describe = (e: unknown) => e instanceof ApiError && [401, 403].includes(e.status) ? '没有访问权限，请重新登录。' : '记录暂时无法加载，请检查连接后重试。';
 function roomOf(c: ChatConversation, participants:readonly ChatParticipant[]): Room { return { id: c.id, kind: c.profile?.kind??'private', name: c.title, members: c.profile?.members??[], remarks: Object.fromEntries((c.profile?.members??[]).map(id=>[id,participants.find(a=>a.id===id)?.name??'未命名 AI'])), activity: Date.parse(c.createdAt), pinned: false, rules: { mixed: false, mentions: false, limited: true } }; }
@@ -24,69 +37,103 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
     const [messages, setMessages] = useState<ChatMessage[]>([]), [loadedFor, setLoadedFor] = useState<string | null>(null), [before, setBefore] = useState<number | null>(null), [historyError, setHistoryError] = useState(''), [historyBusy, setHistoryBusy] = useState(false);
     const [query, setQuery] = useState(''), [notice, setNotice] = useState(''), [drawer, setDrawer] = useState(false), [dark, setDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
     const [composers, setComposers] = useState<Record<string, Composer>>({}), [scrolled, setScrolled] = useState<Record<string, boolean>>({});
-    const [settings, setSettings] = useState<{configured:boolean;maxMessageChars:number;model?:string;participants?:ChatParticipant[];conversationProfilesEnabled?:boolean}>({configured:false,maxMessageChars:12000});
+    const [settings, setSettings] = useState<Settings>({configured:false,maxMessageChars:12000});
     const [turns,setTurns] = useState<Record<string,ChatTurn|null>>({});
     const [creating,setCreating]=useState(false),[configuring,setConfiguring]=useState<string|null>(null);
     const [responders,setResponders]=useState<Record<string,string>>({});
     const [progress,setProgress]=useState<Record<string,string>>({});
     const [writeBusy,setWriteBusy] = useState(false);
     const sending = useRef(false), pendingCreate = useRef(new Map<string,string>());
-    const pending = useRef(new Map<string,{clientMessageId:string;content:string;time:number;replyToMemberId?:string}>());
+    const pending = useRef<Map<string,PendingSend>|null>(null);
+    if(!pending.current)pending.current=live?readPending():new Map();
+    const pendingRequests=pending.current;
+    const [online,setOnline]=useState(navigator.onLine),[visible,setVisible]=useState(!document.hidden);
+    const [refreshToken,setRefreshToken]=useState(0);
+    const listFlight=useRef<Promise<void>|null>(null),configCache=useRef<Settings|null>(null);
+    const historyController=useRef<AbortController|null>(null),historyFlight=useRef<Promise<void>|null>(null);
     const retries = useRef(new Map<string,string>());
     const cache = useRef(new Map<string, {
         items: ChatMessage[];
         before: number | null;
     }>());
+    const roomsRef=useRef(rooms);roomsRef.current=rooms;
     const generation = useRef(0), selectedRef = useRef(selected);
     selectedRef.current = selected;
     const listScroll = useRef<HTMLDivElement>(null), listTop = useRef(0), navigation = useRef<HTMLButtonElement>(null);
     function restoreNavigationFocus() { requestAnimationFrame(() => { const button = selected ? document.querySelector<HTMLButtonElement>('.v11-chat-head [aria-label="打开主导航"]') : navigation.current; button?.focus(); }); }
-    const loadRooms = useCallback(async (beforeCursor?: number) => { setListLoading(true); setListError(''); try {
-        type Settings={configured:boolean;maxMessageChars:number;model?:string;participants?:ChatParticipant[];conversationProfilesEnabled?:boolean};
-        const path=base+'/conversations?limit=50'+(beforeCursor?'&before='+beforeCursor:'');
-        const [config,page] = live ? await Promise.all([api<Settings>(base+'/config'),api<ChatConversationPage>(path)]) : await (async()=>{
-            const config=await api<Settings>(base+'/config');
-            if(config.configured!==false)throw Error('M0 model boundary mismatch');
-            return [config,await api<ChatConversationPage>(path)] as const;
-        })();
-        setSettings(config);
-        setRooms(old => beforeCursor ? [...old, ...page.items.filter(c => !old.some(r => r.id === c.id))] : page.items);
-        setNext(page.nextBefore);
-    }
-    catch (e) {
-        setListError(describe(e));
-    }
-    finally {
-        setListLoading(false);
-    } }, [api, live]);
-    useEffect(() => { void loadRooms(); }, [loadRooms]);
-    useEffect(() => {
-        const serial = ++generation.current, controller = new AbortController();
-        setLoadedFor(null);
-        setMessages([]);
-        setBefore(null);
-        setHistoryError('');
-        setHistoryBusy(false);
-        if(selected)setProgress(old=>({...old,[selected]:''}));
-        if (!selected)
-            return;
-        if (!uuid.test(selected)) {
-            setHistoryError('会话编号无效；未读取数据。');
-            return;
+    const loadRooms = useCallback((beforeCursor?: number):Promise<void> => {
+        if(listFlight.current)return listFlight.current;
+        const run=async()=>{setListLoading(true);setListError('');try{
+            const path=base+'/conversations?limit=50'+(beforeCursor?'&before='+beforeCursor:'');
+            const configRequest=configCache.current?Promise.resolve(configCache.current):api<Settings>(base+'/config');
+            const [config,page]=live?await Promise.all([configRequest,api<ChatConversationPage>(path)]):await(async()=>{
+                const config=await configRequest;if(config.configured!==false)throw Error('M0 model boundary mismatch');
+                return [config,await api<ChatConversationPage>(path)] as const;
+            })();
+            configCache.current=config;setSettings(config);
+            setRooms(old=>beforeCursor?[...old,...page.items.filter(c=>!old.some(r=>r.id===c.id))]:[...page.items,...old.filter(c=>c.id===selectedRef.current&&!page.items.some(r=>r.id===c.id))]);
+            setNext(page.nextBefore);
+        }catch(e){setListError(describe(e));}finally{setListLoading(false);}};
+        listFlight.current=run().finally(()=>{listFlight.current=null;});return listFlight.current;
+    },[api,live]);
+    useEffect(()=>{void loadRooms();},[loadRooms]);
+    const mergeMessages=useCallback((id:string,rows:ChatMessage[])=>{
+        const saved=cache.current.get(id)??{items:[],before:null};
+        const items=[...new Map([...saved.items,...rows].map(m=>[m.id,m])).values()].sort((a,b)=>a.messageSeq-b.messageSeq);
+        const same=items.length===saved.items.length&&items.every((m,i)=>m.id===saved.items[i].id&&m.content===saved.items[i].content&&m.revision===saved.items[i].revision&&m.speakerId===saved.items[i].speakerId);
+        const nextItems=same?saved.items:items;cache.current.set(id,{...saved,items:nextItems});
+        if(selectedRef.current===id)setMessages(nextItems);
+    },[]);
+    const reconcilePending=useCallback(async(id:string,signal?:AbortSignal)=>{
+        const p=pendingRequests.get(id);if(!p)return;
+        try{
+            const result=await api<{turn:ChatTurn;messages:ChatMessage[]}>(base+'/conversations/'+id+'/receipts/'+p.clientMessageId,{signal});
+            if(signal?.aborted)return;
+            if(pendingRequests.get(id)?.clientMessageId!==p.clientMessageId)return;
+            pendingRequests.delete(id);rememberPending(pendingRequests);
+            mergeMessages(id,result.messages);setTurns(old=>({...old,[id]:result.turn}));
+            setComposers(old=>{const c=old[id];return c&&p.content===c.draft?{...old,[id]:{...c,draft:''}}:old;});
+            if(selectedRef.current===id)setNotice('消息已确认保存，已恢复服务端状态。');
+        }catch(e){
+            if(signal?.aborted)return;
+            if(e instanceof ApiError&&e.code==='RECEIPT_NOT_FOUND'){
+                if(selectedRef.current===id)setNotice(p.content?'尚未查到保存回执；可用同一编号重试发送。':'上次发送尚未查到回执；请重新输入原消息后重试，将沿用原编号。');
+            }else if(e instanceof ApiError&&[401,403].includes(e.status))throw e;
         }
-        api<ChatHistoryPage>(base + '/conversations/' + selected + '/messages', { signal: controller.signal }).then(page => { if (generation.current === serial) {
-            const saved = cache.current.get(selected), earliest = page.items[0]?.messageSeq ?? Infinity, retained = page.items.length ? (saved?.items.filter(m => m.messageSeq < earliest) ?? []) : [];
-            const items = [...retained, ...page.items];
-            const cursor = retained.length ? saved!.before : page.nextBefore;
-            cache.current.set(selected, { items, before: cursor });
-            setMessages(items);
-            setBefore(cursor);
-            setLoadedFor(selected);
-            if(live)setTurns(old=>({...old,[selected]:page.unresolvedTurn}));
-        } }).catch(e => { if (!controller.signal.aborted && generation.current === serial)
-            setHistoryError(describe(e)); });
-        return () => controller.abort();
-    }, [api, selected, live]);
+    },[api,mergeMessages,pendingRequests]);
+    useEffect(()=>{
+        const serial=++generation.current,controller=new AbortController();
+        historyController.current?.abort();historyController.current=controller;
+        historyFlight.current=null;
+        const saved=selected?cache.current.get(selected):undefined;
+        setMessages(saved?.items??[]);setBefore(saved?.before??null);setLoadedFor(saved&&selected?selected:null);
+        setHistoryError('');setHistoryBusy(!!selected);
+        if(!selected){setHistoryBusy(false);return;}
+        if(!uuid.test(selected)){setHistoryError('会话编号无效；未读取数据。');setHistoryBusy(false);return;}
+        const id=selected;
+        const roomRequest=roomsRef.current.some(r=>r.id===id)?Promise.resolve(null):api<ChatConversation>(base+'/conversations/'+id,{signal:controller.signal});
+        const job=Promise.all([api<ChatHistoryPage>(base+'/conversations/'+id+'/messages',{signal:controller.signal}),roomRequest]).then(async([page,conversation])=>{
+            if(conversation&&!controller.signal.aborted)setRooms(old=>old.some(r=>r.id===id)?old:[conversation,...old]);
+            if(controller.signal.aborted||generation.current!==serial)return;
+            const current=cache.current.get(id),earliest=page.items[0]?.messageSeq??Infinity;
+            const retained=page.items.length?current?.items.filter(m=>m.messageSeq<earliest)??[]:[];
+            const arrived=current!==saved?(current?.items.filter(m=>m.messageSeq>(page.items.at(-1)?.messageSeq??0))??[]):[];
+            const items=[...retained,...page.items,...arrived];
+            const cursor=retained.length?current!.before:page.nextBefore;
+            cache.current.set(id,{items,before:cursor});setMessages(items);setBefore(cursor);setLoadedFor(id);
+            if(live){setTurns(old=>({...old,[id]:page.unresolvedTurn}));await reconcilePending(id,controller.signal);}
+        }).catch(e=>{if(!controller.signal.aborted&&generation.current===serial){
+            if(e instanceof ApiError&&[401,403,404].includes(e.status)){cache.current.delete(id);setMessages([]);setLoadedFor(null);}
+            setHistoryError(describe(e));
+        }}).finally(()=>{if(generation.current===serial)setHistoryBusy(false);if(historyFlight.current===job)historyFlight.current=null;});
+        historyFlight.current=job;return()=>controller.abort();
+    },[api,selected,live,refreshToken,reconcilePending]);
+    useEffect(()=>{
+        const resume=()=>{setVisible(!document.hidden);setOnline(navigator.onLine);if(!navigator.onLine||document.hidden)return;setRefreshToken(n=>n+1);void loadRooms();};
+        const offline=()=>{setOnline(false);};
+        window.addEventListener('online',resume);window.addEventListener('offline',offline);document.addEventListener('visibilitychange',resume);
+        return()=>{window.removeEventListener('online',resume);window.removeEventListener('offline',offline);document.removeEventListener('visibilitychange',resume);};
+    },[loadRooms]);
     useEffect(() => { if (!selected && listScroll.current)
         listScroll.current.scrollTop = listTop.current; }, [selected]);
     useEffect(() => { if (!drawer)
@@ -94,64 +141,45 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
         setDrawer(false);
         restoreNavigationFocus();
     } }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close); }, [drawer, selected]);
-    async function historyPage(older = false) {
-        if (!selected || historyBusy || older && before === null)
-            return;
-        const id = selected, serial = generation.current;
-        setHistoryBusy(true);
-        setHistoryError('');
-        try {
-            const page = await api<ChatHistoryPage>(base + '/conversations/' + id + '/messages' + (older ? '?before=' + before : ''));
-            if (serial !== generation.current || selectedRef.current !== id)
-                return;
-            const saved = cache.current.get(id);
-            const old = saved?.items ?? messages, earliest = page.items[0]?.messageSeq ?? Infinity, retained = older ? old : page.items.length ? old.filter(m => m.messageSeq < earliest) : [];
-            const items = [...new Map([...retained, ...page.items].map(m => [m.id, m])).values()].sort((a, b) => a.messageSeq - b.messageSeq), cursor = older || loadedFor !== id ? page.nextBefore : before;
-            cache.current.set(id, { items, before: cursor });
-            setMessages(items);
-            setBefore(cursor);
-            setLoadedFor(id);
-            if(live&&!older)setTurns(old=>({...old,[id]:page.unresolvedTurn}));
-        }
-        catch (e) {
-            if (serial === generation.current) {
-                if (e instanceof ApiError && [401, 403].includes(e.status)) {
-                    cache.current.delete(id);
-                    setMessages([]);
-                    setLoadedFor(null);
-                }
-                setHistoryError(describe(e));
-            }
-        }
-        finally {
-            if (serial === generation.current)
-                setHistoryBusy(false);
-        }
+    async function historyPage(older=false){
+        if(!selected||historyFlight.current||older&&before===null)return;
+        if(!older){setRefreshToken(n=>n+1);return;}
+        const id=selected,serial=generation.current,controller=new AbortController();historyController.current?.abort();historyController.current=controller;
+        setHistoryBusy(true);setHistoryError('');
+        const job=api<ChatHistoryPage>(base+'/conversations/'+id+'/messages?before='+before,{signal:controller.signal}).then(page=>{
+            if(controller.signal.aborted||serial!==generation.current||selectedRef.current!==id)return;
+            const saved=cache.current.get(id);cache.current.set(id,{items:saved?.items??[],before:page.nextBefore});
+            mergeMessages(id,page.items);setBefore(page.nextBefore);
+        }).catch(e=>{if(!controller.signal.aborted&&serial===generation.current)setHistoryError(describe(e));})
+        .finally(()=>{if(serial===generation.current)setHistoryBusy(false);if(historyFlight.current===job)historyFlight.current=null;});
+        historyFlight.current=job;await job;
     }
     const selectedConversation=rooms.find(r=>r.id===selected);
-    const replyMemberId=selectedConversation?.profile?.kind==='private'?selectedConversation.profile.members[0]:(selected?responders[selected]??(turns[selected]?.status!=='succeeded'?turns[selected]?.replyToMemberId??'':''):'');
+    const replyMemberId=selectedConversation?.profile?.kind==='private'?selectedConversation.profile.members[0]:(selected?responders[selected]??pendingRequests.get(selected)?.replyToMemberId??(turns[selected]?.status!=='succeeded'?turns[selected]?.replyToMemberId??'':''):'');
     const turn = selected ? turns[selected] : null;
-    const pendingSend = selected ? pending.current.has(selected) : false;
+    const pendingSend = selected ? pendingRequests.has(selected) : false;
     const composer = selected ? composers[selected] ?? emptyComposer() : emptyComposer();
     const unresolved = !!turn && turn.status !== 'succeeded';
-    const statusText = pendingSend ? '发送结果未确认；重试将使用同一消息编号。请勿关闭页面。' : turn ? ({queued:'消息已保存，等待回复',running:'消息已保存，正在回复',succeeded:'回复已保存',failed:'回复失败；用户消息已保存',unknown:'上次调用结果未知；用户消息已保存'}[turn.status]) : settings.configured ? '发送将调用后端配置的模型。长期记忆暂不可用。' : '后端模型未配置；历史可读取，发送已禁用。';
+    const statusText = !online ? '网络已断开；已保存消息不受影响，恢复连接后会重新核对状态。' : pendingSend ? '发送结果未确认；重试将使用同一消息编号。请勿关闭页面。' : turn ? ({queued:'消息已保存，等待回复',running:'消息已保存，正在回复',succeeded:'回复已保存',failed:'回复失败；用户消息已保存',unknown:'上次调用结果未知；用户消息已保存'}[turn.status]+(turn.errorCode?'（'+turn.errorCode+'）':'')) : settings.configured ? '发送将调用后端配置的模型。长期记忆暂不可用。' : '后端模型未配置；历史可读取，发送已禁用。';
     useEffect(()=>{
-        if(!live||!selected||!turn||!['queued','running'].includes(turn.status))return;
-        const id=selected,turnId=turn.id;let active=true,timer:ReturnType<typeof setTimeout>;
+        if(!live||!online||!selected||!turn||!['queued','running'].includes(turn.status)||!visible)return;
+        const id=selected,turnId=turn.id,controller=new AbortController();let active=true,cursor:string|undefined,failures=0;
+        let timer:ReturnType<typeof setTimeout>;
         const poll=async()=>{try{
-            const result=await api<{turn:ChatTurn;messages:ChatMessage[];progress?:{content:string}|null}>(base+'/turns/'+turnId);
-            if(!active)return;
-            setTurns(old=>({...old,[id]:result.turn}));
-            setProgress(old=>({...old,[id]:result.turn.status==='running'?result.progress?.content??'':''}));
-            setMessages(old=>{
-                const rows=[...new Map([...old,...result.messages].map(m=>[m.id,m])).values()].sort((a,b)=>a.messageSeq-b.messageSeq);
-                return rows.length===old.length&&rows.every((m,i)=>m.id===old[i].id&&m.content===old[i].content&&m.revision===old[i].revision)?old:rows;
-            });
-            if(['queued','running'].includes(result.turn.status))timer=setTimeout(poll,500);
-        }catch(e){if(active){setNotice(describe(e));if(e instanceof ApiError&&[401,403].includes(e.status)){setProgress(old=>({...old,[id]:''}));setMessages([]);setLoadedFor(null);return;}timer=setTimeout(poll,3000);}}};
-        timer=setTimeout(poll,500);return()=>{active=false;clearTimeout(timer);};
-    },[api,live,selected,turn?.id,turn?.status]);
-    useEffect(()=>{if(!live)return;const warn=(event:BeforeUnloadEvent)=>{if(pending.current.size||Object.values(composers).some(c=>c.draft)){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[live,composers]);
+            const result=await api<{turn:ChatTurn;messages:ChatMessage[];updateCursor?:string;progress?:{content:string}|null}>(base+'/turns/'+turnId+(cursor?'?after='+encodeURIComponent(cursor):''),{signal:controller.signal,timeoutMs:30000});
+            if(!active||selectedRef.current!==id)return;
+            failures=0;setTurns(old=>old[id]?.status===result.turn.status?old:{...old,[id]:result.turn});
+            setProgress(old=>{const text=result.turn.status==='running'?result.progress?.content??'':'';return old[id]===text?old:{...old,[id]:text};});
+            if(result.messages.length)mergeMessages(id,result.messages);
+            cursor=result.updateCursor;
+            if(['queued','running'].includes(result.turn.status))timer=setTimeout(poll,cursor?100:500);
+        }catch(e){if(active&&!controller.signal.aborted){setNotice(describe(e));
+            if(e instanceof ApiError&&[401,403].includes(e.status)){cache.current.clear();setProgress({});setMessages([]);setLoadedFor(null);return;}
+            timer=setTimeout(poll,Math.min(1000*2**failures++,10000));
+        }}};
+        void poll();return()=>{active=false;controller.abort();clearTimeout(timer);};
+    },[api,live,online,visible,selected,turn?.id,turn?.status,refreshToken,mergeMessages]);
+    useEffect(()=>{if(!live)return;const warn=(event:BeforeUnloadEvent)=>{if(pendingRequests.size||Object.values(composers).some(c=>c.draft)){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[live,composers]);
     function writeError(e:unknown){return e instanceof ApiError ? '请求未完成：'+e.code+'。请刷新状态后重试。' : '连接中断，结果未知。保留页面，重试会复用同一编号。';}
     async function createConversation(kind:ChatConversationProfile['kind'],members:string[],title:string){
         if(!live||sending.current||!settings.conversationProfilesEnabled)return;
@@ -167,22 +195,25 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
         }catch(e){throw Error(writeError(e));}finally{sending.current=false;setWriteBusy(false);}
     }
     async function send(){
-        if(!live||!selected||loadedFor!==selected||sending.current||!settings.configured||!selectedConversation?.profile||!replyMemberId)return;
-        const id=selected;let request=pending.current.get(id);
-        if(!request){if(unresolved||!composer.draft.trim())return;request={clientMessageId:crypto.randomUUID(),content:composer.draft,time:Date.now(),replyToMemberId:replyMemberId};pending.current.set(id,request);}
+        if(!live||!online||historyBusy||!selected||loadedFor!==selected||sending.current||!settings.configured||!selectedConversation?.profile||!replyMemberId)return;
+        const id=selected;let request=pendingRequests.get(id);
+        if(!request){if(unresolved||!composer.draft.trim())return;request={clientMessageId:crypto.randomUUID(),content:composer.draft,time:Date.now(),replyToMemberId:replyMemberId};pendingRequests.set(id,request);}
+        if(!request.content){if(!composer.draft.trim())return;request={...request,content:composer.draft};pendingRequests.set(id,request);}
+        rememberPending(pendingRequests);
         sending.current=true;setWriteBusy(true);
         try{
             const receipt=await api<DurableMessageReceipt&{turn:ChatTurn;message?:ChatMessage|null}>(base+'/conversations/'+id+'/messages',{method:'POST',body:JSON.stringify({clientMessageId:request.clientMessageId,content:request.content,replyToMemberId:request.replyToMemberId})});
-            pending.current.delete(id);setComposers(old=>({...old,[id]:{...(old[id]??emptyComposer()),draft:''}}));setTurns(old=>({...old,[id]:receipt.turn}));
-            if(selectedRef.current===id){
-                if(receipt.message&&receipt.turn.status!=='succeeded'){
-                    setMessages(old=>[...new Map([...old,receipt.message!].map(m=>[m.id,m])).values()].sort((a,b)=>a.messageSeq-b.messageSeq));
-                }else await historyPage(); // Compatibility with earlier backends and completed replayed turns.
+            pendingRequests.delete(id);rememberPending(pendingRequests);setComposers(old=>({...old,[id]:{...(old[id]??emptyComposer()),draft:old[id]?.draft===request!.content?'':old[id]?.draft??''}}));setTurns(old=>({...old,[id]:receipt.turn}));
+            if(receipt.message)mergeMessages(id,[receipt.message]);
+            if(receipt.turn.status==='succeeded'){
+                const result=await api<{turn:ChatTurn;messages:ChatMessage[]}>(base+'/turns/'+receipt.turnId);
+                mergeMessages(id,result.messages);
             }
-        }catch(e){setNotice(writeError(e));}finally{sending.current=false;setWriteBusy(false);}
+
+        }catch(e){setNotice(writeError(e));if(pendingRequests.has(id)&&!(e instanceof ApiError&&[401,403].includes(e.status)))await reconcilePending(id).catch(()=>{});if(e instanceof ApiError&&[400,409,413,429].includes(e.status)&&pendingRequests.has(id)){pendingRequests.set(id,{...request,content:undefined});rememberPending(pendingRequests);}if(e instanceof ApiError&&e.code==='TURN_UNRESOLVED')setRefreshToken(n=>n+1);}finally{sending.current=false;setWriteBusy(false);}
     }
     async function retryReply(){
-        if(!live||!turn||sending.current||!settings.configured)return;
+        if(!live||!online||!turn||sending.current||!settings.configured)return;
         if(turn.status==='unknown'&&!window.confirm('上一次调用可能已经计费。重试可能再次计费，是否继续？'))return;
         const id=turn.conversationId;retries.current.set(turn.id,retries.current.get(turn.id)??crypto.randomUUID());sending.current=true;setWriteBusy(true);
         try{const result=await api<{turn:ChatTurn}>(base+'/turns/'+turn.id+'/retry',{method:'POST',body:JSON.stringify({retryId:retries.current.get(turn.id),acknowledgeUnknown:turn.status==='unknown'})});retries.current.delete(turn.id);setTurns(old=>({...old,[id]:result.turn}));}
@@ -196,17 +227,18 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
         navigate(-1);
     else
         navigate(route, { replace: true }); }
-    const conversation = rooms.find(r => r.id === selected), room = conversation ? roomOf(conversation,settings.participants??[]) : undefined;
-    const display: Message[] = messages.map(m => ({ id: m.id, turnId: m.turnId, author: m.role === 'user' ? 'me' : m.speakerId??'unattributed', versions: [m.content], version: 0, time: Date.parse(m.createdAt), sourceRef: { messageId: m.id, revision: m.revision ?? 1 } }));
+    const conversation = rooms.find(r => r.id === selected), room = useMemo(()=>conversation?roomOf(conversation,settings.participants??[]):undefined,[conversation,settings.participants]);
+    const savedDisplay=useMemo(()=>messages.map(m => ({ id: m.id, turnId: m.turnId, author: m.role === 'user' ? 'me' : m.speakerId??'unattributed', versions: [m.content], version: 0, time: Date.parse(m.createdAt), sourceRef: { messageId: m.id, revision: m.revision ?? 1 } })),[messages]);
+    const display:Message[]=[...savedDisplay];
     if(live&&selected){
-        const waiting=pending.current.get(selected);
-        if(waiting&&turn?.clientMessageId!==waiting.clientMessageId)display.push({id:waiting.clientMessageId,turnId:waiting.clientMessageId,author:'me',versions:[waiting.content],version:0,time:waiting.time,delivery:'sending'});
+        const waiting=pendingRequests.get(selected);
+        if(waiting?.content&&turn?.clientMessageId!==waiting.clientMessageId)display.push({id:waiting.clientMessageId,turnId:waiting.clientMessageId,author:'me',versions:[waiting.content],version:0,time:waiting.time,delivery:'sending'});
         if(turn?.status==='running'&&progress[selected])display.push({id:'stream-'+turn.id,turnId:turn.id,author:turn.replyToMemberId??'unattributed',versions:[progress[selected]],version:0,time:Date.parse(turn.createdAt),delivery:'streaming'});
     }
     async function copySource(m: Message) { if (!selected || selectedRef.current !== selected)
         throw Error('会话已切换'); const source = messages.find(row => row.id === m.id); if (!source)
         throw Error('来源已失效'); const page = await api<ChatHistoryPage>(base + '/conversations/' + selected + '/messages?limit=1&before=' + (source.messageSeq + 1)); const current = page.items.find(row => row.id === m.id); if (!current || (current.revision ?? 1) !== m.sourceRef?.revision)
-        throw Error('来源已变更，请刷新后复制'); return current.content; }
+        throw Error('来源已变更，请刷新后复制'); if(selectedRef.current!==selected)throw Error('会话已切换'); return current.content; }
     return <div className={'m0-shell ' + (dark ? 'dark' : '') + (drawer ? ' nav-open' : '')}>
   <aside className="m0-drawer" aria-label="主导航侧栏" aria-hidden={!drawer} inert={!drawer}><button onClick={() => { setDrawer(false); restoreNavigationFocus(); }} aria-label="关闭主导航">关闭 ‹</button><nav aria-label="侧栏导航"><button disabled title="尚未接通">Home · 未开放</button><button aria-current="page" onClick={() => { setDrawer(false); navigate(route); }}>Chat</button><button disabled title="尚未接通">World · 未开放</button></nav><button onClick={() => setDark(d => !d)}>{dark ? '浅色外观' : '深色外观'}</button><button disabled={session.busy} onClick={() => void session.logout()}>退出登录</button><small>{live ? '正式聊天 · 同源认证\n长期记忆暂未接入' : '独立测试 · 只读\n模型调用关闭'}</small></aside>
   <div className="m0-content"><section className={'v11-workspace m0-workspace ' + (dark ? 'dark ' : '') + (selected||creating ? 'show-chat' : 'show-list')} aria-label={live ? "小家聊天" : "小家 M0 独立测试聊天"}>
@@ -217,20 +249,20 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
     </div><footer>{live ? settings.conversationProfilesEnabled?'已保存会话':'会话成员功能待数据库扩展升级' : environment.fixture ? '自动化测试夹具 · 合成记录' : 'M0-2 独立只读测试'}<button onClick={() => void loadRooms()} disabled={listLoading}>刷新列表</button></footer>
    </aside>
    <div className="v11-chat">{room && loadedFor === room.id ? <Timeline key={room.id} room={room} messages={display} composer={composers[room.id] ?? emptyComposer()} onCompose={patch => { setComposers(old => ({ ...old, [room.id]: { ...(old[room.id] ?? emptyComposer()), ...patch } })); if ('scroll' in patch)
-        setScrolled(old => ({ ...old, [room.id]: true })); }} onStage={() => setNotice('暂存与发送尚未开放')} onSubmit={() => live ? void send() : setNotice('发送尚未开放')} onPending={() => { }} onMessages={() => setNotice('消息修改尚未接通')} onBack={back} onDetails={() => navigate(location.pathname + location.search + '&view=details')} notice={setNotice} onJumped={() => { }} linked locked={live&&(writeBusy||pendingSend||unresolved)} live={live?{disabled:writeBusy||!settings.configured||!selectedConversation?.profile||!replyMemberId||(!pendingSend&&(!composer.draft.trim()||unresolved)),maxLength:settings.maxMessageChars,status:statusText,replyPicker:room.kind==='group'?<div className="v11-setting"><label>本次回复成员 <select aria-label="本次回复成员" disabled={writeBusy||pendingSend||unresolved} value={replyMemberId} onChange={e=>setResponders(old=>({...old,[room.id]:e.target.value}))}><option value="">请选择成员</option>{room.members.map(id=><option key={id} value={id}>{room.remarks[id]}</option>)}</select><small>手动单次回复 · 共用模型 · 自主调度及角色人格未配置</small></label></div>:undefined}:undefined} onRead={copySource} m0={{ modelLabel: live?(settings.model||'模型未配置'):'模型未启用', onNavigation: () => setDrawer(d => !d), initialLatest: !scrolled[room.id], hasEarlier: before !== null, loadEarlier: () => historyPage(true), loadingEarlier: historyBusy }}/> : <div className="m0-history-state">{selected && <button className="v11-text-button" onClick={back}>〈 返回会话列表</button>}<p role="status">{!selected ? '选择一个会话查看已保存记录' : historyError || (!room ? '正在查找会话；可返回列表加载更多' : '正在读取聊天记录…')}</p>{historyError && <button onClick={() => void historyPage()}>重试读取记录</button>}</div>}
+        setScrolled(old => ({ ...old, [room.id]: true })); }} onStage={() => setNotice('暂存与发送尚未开放')} onSubmit={() => live ? void send() : setNotice('发送尚未开放')} onPending={() => { }} onMessages={() => setNotice('消息修改尚未接通')} onBack={back} onDetails={() => navigate(location.pathname + location.search + '&view=details')} notice={setNotice} onJumped={() => { }} linked locked={live&&(writeBusy||!!pendingRequests.get(selected??'')?.content)} live={live?{disabled:writeBusy||historyBusy||!online||!settings.configured||!selectedConversation?.profile||!replyMemberId||(!pendingSend&&(!composer.draft.trim()||unresolved))||(pendingSend&&!pendingRequests.get(selected??'')?.content&&!composer.draft.trim()),maxLength:settings.maxMessageChars,status:statusText,replyPicker:room.kind==='group'?<div className="v11-setting"><label>本次回复成员 <select aria-label="本次回复成员" disabled={writeBusy||pendingSend||unresolved} value={replyMemberId} onChange={e=>setResponders(old=>({...old,[room.id]:e.target.value}))}><option value="">请选择成员</option>{room.members.map(id=><option key={id} value={id}>{room.remarks[id]}</option>)}</select><small>手动单次回复 · 共用模型 · 自主调度及角色人格未配置</small></label></div>:undefined}:undefined} onRead={copySource} m0={{ modelLabel: live?(settings.model||'模型未配置'):'模型未启用', onNavigation: () => setDrawer(d => !d), initialLatest: !scrolled[room.id], hasEarlier: before !== null, loadEarlier: () => historyPage(true), loadingEarlier: historyBusy }}/> : <div className="m0-history-state">{selected && <button className="v11-text-button" onClick={back}>〈 返回会话列表</button>}<p role="status">{!selected ? '选择一个会话查看已保存记录' : historyError || (!room ? '正在查找会话；可返回列表加载更多' : '正在读取聊天记录…')}</p>{historyError && <button onClick={() => void historyPage()}>重试读取记录</button>}</div>}
 
-    {live&&selected&&loadedFor===selected&&<div className="live-chat-status" role="status">{statusText}{pendingSend&&<button disabled={writeBusy} onClick={()=>void send()}>确认或重发同一请求</button>}{turn&&['failed','unknown'].includes(turn.status)&&<button disabled={writeBusy||!settings.configured} onClick={()=>void retryReply()}>重试回复{turn.status==='unknown'?'（可能再次计费）':''}</button>}<button disabled={historyBusy||writeBusy} onClick={()=>void historyPage()}>刷新状态</button></div>}
+    {live&&selected&&loadedFor===selected&&<div className="live-chat-status" role="status">{statusText}{pendingSend&&<button disabled={writeBusy||historyBusy||!online||(!pendingRequests.get(selected??'')?.content&&!composer.draft.trim())} onClick={()=>void send()}>确认或重发同一请求</button>}{turn&&['failed','unknown'].includes(turn.status)&&<button disabled={writeBusy||!online||!settings.configured} onClick={()=>void retryReply()}>重试回复{turn.status==='unknown'?'（可能再次计费）':''}</button>}<button disabled={historyBusy||writeBusy||!online} onClick={()=>void historyPage()}>刷新状态</button></div>}
     {historyError && loadedFor === room?.id && !details && <p role="alert" className="m0-history-error">{historyError}</p>}
     {live&&room&&!conversation?.profile&&<div className="live-chat-status" role="status">历史会话尚未设置类型与成员，不会自动归给谢亦言。<button disabled={!settings.conversationProfilesEnabled||writeBusy||unresolved} onClick={()=>{setConfiguring(room.id);setCreating(true);}}>设置会话成员</button></div>}
-    {creating&&<ConversationCreator participants={settings.participants??[]} busy={writeBusy} heading={configuring?'设置会话成员':'新建会话'} onCreate={createConversation} onClose={()=>{setCreating(false);setConfiguring(null);}}/>}
-    {details&&room&&!creating&&<ConversationDetailsFrame kind={room.kind} onBack={back}>
-      <h3>{room.kind==='group'?'群聊信息':'私聊信息'}</h3><div className="v11-setting"><span>{room.kind==='group'?'群名称':'私聊名称'}<small>{room.name}</small></span><button disabled={historyBusy||writeBusy} onClick={()=>void historyPage()}>刷新记录</button></div>
+    {creating&&<Suspense fallback={<p role="status">正在加载会话设置…</p>}><ConversationCreator participants={settings.participants??[]} busy={writeBusy} heading={configuring?'设置会话成员':'新建会话'} onCreate={createConversation} onClose={()=>{setCreating(false);setConfiguring(null);}}/></Suspense>}
+    {details&&room&&!creating&&<Suspense fallback={<p role="status">正在加载会话详情…</p>}><ConversationDetailsFrame kind={room.kind} onBack={back}>
+      <h3>{room.kind==='group'?'群聊信息':'私聊信息'}</h3><div className="v11-setting"><span>{room.kind==='group'?'群名称':'私聊名称'}<small>{room.name}</small></span><button aria-label="刷新聊天记录" disabled={historyBusy||writeBusy} onClick={()=>void historyPage()}>刷新记录</button></div>
       <h3>{room.kind==='group'?'群成员与配置':'私聊 AI'}</h3>{room.members.map(id=><div className="v11-setting" key={id}><span>{room.remarks[id]}<small>角色人格未配置</small></span><span>{id}</span></div>)}{!room.members.length&&<p>成员尚未设置，历史回复归属保持未标注。</p>}
       <div className="v11-setting"><span>当前模型<small>{live?'成员使用现有共用模型服务':'模型未启用'}</small></span><span>{live?(settings.model||'未配置'):'未启用'}</span></div>
       {room.kind==='group'&&<><div className="v11-setting"><span>成员管理</span><button disabled title="成员变更和历史权限尚未接通">未开放</button></div><div className="v11-setting"><span>群内自主发言</span><button disabled title="当前仅用户指定成员的单次回复">未接通</button></div></>}
-      <h3>聊天内容</h3>{historyError&&<p role="alert">{historyError}</p>}<p>创建时间：{new Date(conversation!.createdAt).toLocaleString()}</p>{['修改备注','搜索全部历史','图片与文件','默认音色','编辑与重生成'].map(label=><div className="v11-setting" key={label}><span>{label}</span><button disabled>未开放</button></div>)}
+      <h3>聊天内容</h3>{historyError&&<p className="m0-history-error" role="alert">{historyError}</p>}<p>创建时间：{new Date(conversation!.createdAt).toLocaleString()}</p>{['修改备注','搜索全部历史','图片与文件','默认音色','编辑与重生成'].map(label=><div className="v11-setting" key={label}><span>{label}</span><button disabled>未开放</button></div>)}
       <p className="v11-disclaimer">{live?'消息来自真实聊天服务。成员选择与回复归属已保存；独立人格、长期记忆、多 AI 自主调度尚未接通。':'独立只读测试，不写入、不调用模型。'}</p>
-    </ConversationDetailsFrame>}
+    </ConversationDetailsFrame></Suspense>}
 
    </div>{notice && <div role="status" className="v11-toast">{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div>}
   </section><nav className="m0-main-nav" aria-label="主导航"><button disabled title="Home尚未开放">Home</button><button aria-current="page" onClick={() => { setDrawer(false); navigate(route); }}>Chat</button><button disabled title="World尚未开放">World</button></nav></div>

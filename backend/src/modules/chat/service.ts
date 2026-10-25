@@ -19,6 +19,30 @@ export class ChatService {
     if(this.timings.size>64)this.timings.delete(this.timings.keys().next().value!);
     this.preview=null;
   }
+  private readonly epoch = randomUUID();
+  private readonly listeners = new Map<string, Set<() => void>>();
+  private progressTimer: ReturnType<typeof setTimeout> | undefined;
+  cursor(turnId: string) {
+    return this.epoch + ':' + this.store.turn(turnId).status + ':' + (this.progress(turnId)?.content.length ?? 0);
+  }
+  private notify(turnId: string) { for (const listener of [...(this.listeners.get(turnId) ?? [])]) listener(); }
+  /** Bounded authenticated long poll; no SQLite polling loop, durable state or extra worker. */
+  async waitForChange(turnId: string, after: string, signal: AbortSignal) {
+    if (signal.aborted || !['queued','running'].includes(this.store.turn(turnId).status) || this.cursor(turnId) !== after) return;
+    if ([...this.listeners.values()].reduce((n, set) => n + set.size, 0) >= 64) throw new ChatError(429, 'CHAT_PROGRESS_BUSY');
+    await new Promise<void>(resolve => {
+      const listeners = this.listeners.get(turnId) ?? new Set<() => void>();
+      const finish = () => {
+        clearTimeout(timer); signal.removeEventListener('abort', finish); listeners.delete(finish);
+        if (!listeners.size) this.listeners.delete(turnId);
+        resolve();
+      };
+      const timer = setTimeout(finish, 20000);
+      listeners.add(finish); this.listeners.set(turnId, listeners);
+      signal.addEventListener('abort', finish, {once:true});
+      if (signal.aborted || this.cursor(turnId) !== after) finish();
+    });
+  }
   private working: Promise<void> | null = null;
   private stopped = false;
   private started = false;
@@ -44,7 +68,7 @@ export class ChatService {
     const queued = Number(this.store.db.prepare("SELECT count(*) AS n FROM chat_turns WHERE status IN ('queued','running')").get()!.n);
     if(queued >= this.config.maxQueued) throw new ChatError(429,'CHAT_QUEUE_FULL');
     const receipt = await this.store.accept(message);
-    this.kick();
+    this.notify(receipt.turnId); this.kick();
     return {...receipt,turn:this.store.turn(receipt.turnId),message:this.store.message(receipt.messageId)};
   }
   retry(turnId: string, retryId: string, acknowledgeUnknown: boolean) {
@@ -62,7 +86,7 @@ export class ChatService {
       this.store.db.prepare('INSERT INTO chat_retry_requests VALUES (?,?,?)').run(retryId,turnId,now);
       this.store.db.prepare("UPDATE chat_turns SET status='queued',error_code=NULL,updated_at=? WHERE id=?").run(now,turnId);
     });
-    this.kick(); return this.store.turn(turnId);
+    this.notify(turnId); this.kick(); return this.store.turn(turnId);
   }
   private kick() {
     if(this.stopped || !this.provider || this.working) return;
@@ -71,7 +95,11 @@ export class ChatService {
     });
   }
   async idle() { await this.working; }
-  async stop() { this.stopped = true; this.controller?.abort(); await this.working; }
+  async stop() {
+    this.stopped = true; this.controller?.abort(); await this.working;
+    if (this.progressTimer) clearTimeout(this.progressTimer);
+    for (const id of this.listeners.keys()) this.notify(id);
+  }
   private async drain() {
     while(!this.stopped && this.provider) {
       const row = this.store.db.prepare("SELECT id FROM chat_turns WHERE status='queued' ORDER BY rowid LIMIT 1").get();
@@ -86,6 +114,7 @@ export class ChatService {
       let timer: ReturnType<typeof setTimeout> | undefined;
       let reply;
       this.preview={turnId:turn.id,content:'',started:performance.now(),firstTokenMs:null};
+      this.notify(turn.id);
       try {
         const messages = assembleContext(this.store,turn.id,this.config);
         // Enforce deadline even for replaceable providers that fail to honor cancellation.
@@ -97,12 +126,13 @@ export class ChatService {
         reply = await Promise.race([this.provider.complete(messages,controller.signal,content=>{
           if(controller.signal.aborted||this.preview?.turnId!==turn.id)return;
           this.preview.content=content;
+          if (!this.progressTimer) this.progressTimer = setTimeout(() => { this.progressTimer=undefined; this.notify(turn.id); }, 100);
           if(content&&this.preview.firstTokenMs===null)this.preview.firstTokenMs=Math.round(performance.now()-this.preview.started);
         }),deadline]);
       } catch(error) {
         const failure = error instanceof ModelError ? error : new ModelError('MODEL_CALL_FAILED','unknown');
         this.finishFailure(turn,attemptId,failure); continue;
-      } finally { if(timer) clearTimeout(timer); this.controller = null; this.rememberTiming(turn.id); }
+      } finally { if(timer) clearTimeout(timer); if(this.progressTimer){clearTimeout(this.progressTimer);this.progressTimer=undefined;} this.controller = null; this.rememberTiming(turn.id); }
       // Persist reply, successful outcome and outbox atomically; a DB error must not be reported as a supplier error.
       this.store.transaction(() => {
         const now = new Date().toISOString();
@@ -111,6 +141,7 @@ export class ChatService {
         this.store.db.prepare("UPDATE chat_attempts SET status='succeeded',finished_at=?,provider_request_id=? WHERE id=?").run(now,reply.requestId,attemptId);
         this.recordUsage(attemptId,reply.usage);
       });
+      this.notify(turn.id);
     }
   }
   private recordUsage(attemptId: string, usage?: ProviderUsage) {
@@ -123,5 +154,6 @@ export class ChatService {
       this.store.db.prepare('UPDATE chat_attempts SET status=?,error_code=?,finished_at=? WHERE id=?').run(failure.outcome,failure.code,now,attemptId);
       this.recordUsage(attemptId,failure.usage);
     });
+    this.notify(turn.id);
   }
 }
