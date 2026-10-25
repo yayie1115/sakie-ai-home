@@ -13,7 +13,7 @@ export class DeepSeekProvider implements ModelProvider {
       response = await this.transport(this.settings.baseUrl + '/chat/completions', {
         method: 'POST', redirect: 'error', signal,
         headers: { Authorization: 'Bearer ' + this.settings.apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: this.model, messages, stream: !!onText, ...(onText ? {stream_options:{include_usage:true}} : {}), max_tokens: options.maxOutputTokens??this.settings.maxOutputTokens, ...(options.tools?.length?{tools:options.tools}:{}), thinking: { type: 'disabled' } }),
+        body: JSON.stringify({ model: this.model, messages, stream: !!onText, ...(onText ? {stream_options:{include_usage:true}} : {}), max_tokens: options.maxOutputTokens??this.settings.maxOutputTokens, ...(options.tools?.length?{tools:options.tools}:{}), ...(options.outputFormat==='json'?{response_format:{type:'json_object'}}:{}), thinking: { type: 'disabled' } }),
       });
     } catch { throw new ModelError(signal.aborted ? 'MODEL_TIMEOUT' : 'MODEL_NETWORK_ERROR', 'unknown'); }
     if (!response.ok) {

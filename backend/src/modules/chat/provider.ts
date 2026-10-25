@@ -1,6 +1,6 @@
 export interface ModelToolCall {id:string;type:'function';function:{name:string;arguments:string};}
 export interface ModelTool {type:'function';function:{name:string;description:string;parameters:Record<string,unknown>};}
-export interface ModelOptions {tools?:readonly ModelTool[];maxOutputTokens?:number;}
+export interface ModelOptions {tools?:readonly ModelTool[];maxOutputTokens?:number;outputFormat?:'json';}
 export interface ModelMessage { role: 'system' | 'user' | 'assistant' | 'tool'; content: string; tool_call_id?:string;tool_calls?:ModelToolCall[]; }
 export interface ProviderUsage { inputTokens: number | null; outputTokens: number | null; cacheReadTokens: number | null; cacheWriteTokens: number | null; cacheMissTokens?: number | null; }
 export interface ModelReply { content: string; usage: ProviderUsage; requestId: string | null; toolCalls?:ModelToolCall[]; }
