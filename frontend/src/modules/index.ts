@@ -4,6 +4,5 @@ export const modules = [
   { name: 'diary', label: '日记' },
   { name: 'dream', label: '梦境' },
   { name: 'activity', label: '活动' },
-  { name: 'music', label: '音乐' },
   { name: 'device', label: '设备' },
 ] as const;

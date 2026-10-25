@@ -1,3 +1,4 @@
+import {uiRouter} from './modules/app-ui/routes.js';
 import {LiveMemoryRuntime} from './modules/memory-next/live/runtime.js';
 import {liveMemoryRouter} from './modules/memory-next/live/routes.js';
 import { SyncService, SyncError } from './modules/sync/service.js';
@@ -31,6 +32,7 @@ export function createApp(db:DatabaseSync,options:{auth?:AuthService;chat?:ChatS
   const chat=options.chat??new ChatService(new ChatStore(db),provider,config.chat,memory);
   app.locals.memory=memory;
   app.use('/api/memory',liveMemoryRouter(memory));
+  app.use('/api/ui',uiRouter(db,memory,{configured:!!provider,name:provider?config.chat.model:null},config.publicOrigin));
   app.locals.chat=chat;
   app.use('/api/devices',deviceRouter(sync));
   app.use('/api/chat',chatRouter(chat,req=>auth.require(req),id=>memory.messageChanged(id)));

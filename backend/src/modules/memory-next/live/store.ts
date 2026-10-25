@@ -1,3 +1,4 @@
+import {conversationDeleted} from '../../app-ui/schema.js';
 import {createHash,randomUUID} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {MemoryPipeline,type SourceEvent,type Candidate} from '../pipeline.js';
@@ -14,6 +15,7 @@ export class LiveMemoryStore{
  constructor(readonly db:DatabaseSync,readonly config:MemoryConfig){}
  transaction<T>(run:()=>T){this.db.exec('BEGIN IMMEDIATE');try{const x=run();this.db.exec('COMMIT');return x;}catch(e){this.db.exec('ROLLBACK');throw e;}}
  context(conversationId:string,actor:string):MemoryContext{
+  if(conversationDeleted(this.db,conversationId))throw new MemoryError(403,'CONVERSATION_DELETED');
   if(!chatParticipants.some(p=>p.id===actor))throw new MemoryError(403,'MEMORY_ACTOR_DENIED');
   if(!this.db.prepare('SELECT 1 FROM chat_conversations WHERE id=?').get(conversationId))throw new MemoryError(404,'CONVERSATION_NOT_FOUND');
   const profile=this.db.prepare('SELECT kind FROM chat_live_profiles WHERE conversation_id=?').get(conversationId);

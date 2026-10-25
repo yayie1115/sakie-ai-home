@@ -1,3 +1,4 @@
+import {conversationDeleted,uiReady} from '../app-ui/schema.js';
 import { hasLiveChat } from './live-schema.js';
 import { conversationProfile } from './participants.js';
 import type { ChatConversationProfile } from '@sakie/contracts';
@@ -41,8 +42,9 @@ export class ChatStore implements CloudMessageStore {
   private speaker(turnId:string):string|null{return this.liveReady?String(this.db.prepare('SELECT member_id FROM chat_live_turn_speakers WHERE turn_id=?').get(turnId)?.member_id??'')||null:null;}
   private get speakerJoin(){return this.liveReady?' LEFT JOIN chat_live_turn_speakers sp ON sp.turn_id=m.turn_id ':'';}
   private get speakerColumn(){return this.liveReady?",CASE WHEN m.role='assistant' THEN sp.member_id ELSE NULL END AS speakerId":'';}
+  private withUsage(rows:ChatMessage[]):ChatMessage[]{if(!rows.length)return rows;const ids=[...new Set(rows.map(m=>m.turnId))];const calls=this.db.prepare("SELECT turn_id,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens FROM chat_attempts WHERE status='succeeded' AND turn_id IN ("+ids.map(()=>'?').join(',')+") ORDER BY rowid").all(...ids);const byTurn=new Map(calls.map(a=>[String(a.turn_id),{inputTokens:a.input_tokens as number|null,outputTokens:a.output_tokens as number|null,cacheReadTokens:a.cache_read_tokens as number|null,cacheWriteTokens:a.cache_write_tokens as number|null}]));return rows.map(m=>m.role==='assistant'?{...m,usage:byTurn.get(m.turnId)}:m);}
   turnMessages(turnId:string):ChatMessage[]{
-    return this.db.prepare('SELECT m.id,m.turn_id AS turnId,m.message_seq AS messageSeq,m.role,COALESCE(s.content,m.content) AS content,m.created_at AS createdAt,COALESCE(s.revision,1) AS revision'+this.speakerColumn+' FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id'+this.speakerJoin+' WHERE m.turn_id=? AND s.deleted_at IS NULL ORDER BY m.message_seq').all(turnId) as unknown as ChatMessage[];
+    return this.withUsage(this.db.prepare('SELECT m.id,m.turn_id AS turnId,m.message_seq AS messageSeq,m.role,COALESCE(s.content,m.content) AS content,m.created_at AS createdAt,COALESCE(s.revision,1) AS revision'+this.speakerColumn+' FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id'+this.speakerJoin+' WHERE m.turn_id=? AND s.deleted_at IS NULL ORDER BY m.message_seq').all(turnId) as unknown as ChatMessage[]);
   }
   transaction<T>(action: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -53,6 +55,7 @@ export class ChatStore implements CloudMessageStore {
     const profile=input?conversationProfile(input):null;
     if(profile&&!this.liveReady)throw new ChatError(503,'CHAT_LIVE_UPGRADE_REQUIRED');
     return this.transaction(()=>{
+      if(conversationDeleted(this.db,id))throw new ChatError(409,'CONVERSATION_DELETED');
       const existing=this.conversation(id);
       if(existing){if(existing.title!==title||profile&&JSON.stringify(existing.profile)!==JSON.stringify(profile))throw new ChatError(409,'CONVERSATION_ID_CONFLICT');return existing;}
       this.db.prepare('INSERT INTO chat_conversations(id,title,created_at) VALUES (?,?,?)').run(id,title,new Date().toISOString());
@@ -61,25 +64,29 @@ export class ChatStore implements CloudMessageStore {
     });
   }
   conversation(id:string):ChatConversation|undefined {
+    if(conversationDeleted(this.db,id))return undefined;
     const row=this.db.prepare('SELECT id,title,created_at AS createdAt FROM chat_conversations WHERE id=?').get(id) as unknown as ChatConversation|undefined;
     return row?{...row,profile:this.profile(id)}:undefined;
   }
-  conversations(before:number,limit:number){
-    const rows=this.db.prepare('SELECT id,title,created_at AS createdAt,rowid AS cursor FROM chat_conversations WHERE rowid<? ORDER BY rowid DESC LIMIT ?').all(before,limit) as unknown as (ChatConversation&{cursor:number})[];
+  conversations(before:number,limit:number,query=''){
+    const ready=uiReady(this.db),cursor=ready?'c.rowid+CASE WHEN u.pinned=1 THEN 281474976710656 ELSE 0 END':'c.rowid';
+    const join=ready?' LEFT JOIN app_ui_conversations u ON u.conversation_id=c.id ':'';
+    const visible=ready?' AND u.deleted_at IS NULL':'';
+    const rows=this.db.prepare('SELECT c.id,c.title,c.created_at AS createdAt,'+cursor+' AS cursor'+(ready?',COALESCE(u.pinned,0) AS pinned':'')+' FROM chat_conversations c'+join+' WHERE '+cursor+'<?'+visible+" AND (?='' OR instr(lower(c.title),lower(?))>0 OR EXISTS(SELECT 1 FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id WHERE m.conversation_id=c.id AND s.deleted_at IS NULL AND instr(lower(COALESCE(s.content,m.content)),lower(?))>0)) ORDER BY cursor DESC LIMIT ?").all(before,query,query,query,limit) as unknown as (ChatConversation&{cursor:number})[];
     if(!rows.length)return [];
     if(!this.liveReady)return rows.map(row=>({...row,profile:null}));
     // One bounded metadata query for the page, not one network request per room.
     const profiles=this.db.prepare('SELECT p.conversation_id,p.kind,m.member_id FROM chat_live_profiles p JOIN chat_live_members m ON m.conversation_id=p.conversation_id WHERE p.conversation_id IN ('+rows.map(()=>'?').join(',')+') ORDER BY m.position').all(...rows.map(r=>r.id));
     const byId=new Map<string,ChatConversationProfile>();for(const p of profiles){const id=String(p.conversation_id),profile=byId.get(id)??{kind:p.kind as ChatConversationProfile['kind'],members:[]};profile.members.push(String(p.member_id));byId.set(id,profile);}
-    return rows.map(row=>({...row,profile:byId.get(row.id)??null}));
+    return rows.map(row=>({...row,...(ready?{pinned:!!row.pinned}:{}),profile:byId.get(row.id)??null}));
   }
   turn(id: string): ChatTurn {
     const row = this.db.prepare('SELECT id,conversation_id AS conversationId,client_message_id AS clientMessageId,turn_seq AS turnSeq,status,error_code AS errorCode,created_at AS createdAt FROM chat_turns WHERE id=?').get(id);
-    if(!row) throw new ChatError(404,'TURN_NOT_FOUND'); return {...row,replyToMemberId:this.speaker(id)} as unknown as ChatTurn;
+    if(!row||conversationDeleted(this.db,String(row.conversationId))) throw new ChatError(404,'TURN_NOT_FOUND'); return {...row,replyToMemberId:this.speaker(id)} as unknown as ChatTurn;
   }
   messages(conversationId: string, before: number, limit: number): ChatMessage[] {
     if(!this.conversation(conversationId)) throw new ChatError(404,'CONVERSATION_NOT_FOUND');
-    return (this.db.prepare('SELECT m.id,m.turn_id AS turnId,m.message_seq AS messageSeq,m.role,COALESCE(s.content,m.content) AS content,m.created_at AS createdAt,COALESCE(s.revision,1) AS revision'+this.speakerColumn+' FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id'+this.speakerJoin+' WHERE m.conversation_id=? AND m.message_seq<? AND s.deleted_at IS NULL ORDER BY m.message_seq DESC LIMIT ?').all(conversationId,before,limit) as unknown as ChatMessage[]).reverse();
+    return this.withUsage((this.db.prepare('SELECT m.id,m.turn_id AS turnId,m.message_seq AS messageSeq,m.role,COALESCE(s.content,m.content) AS content,m.created_at AS createdAt,COALESCE(s.revision,1) AS revision'+this.speakerColumn+' FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id'+this.speakerJoin+' WHERE m.conversation_id=? AND m.message_seq<? AND s.deleted_at IS NULL ORDER BY m.message_seq DESC LIMIT ?').all(conversationId,before,limit) as unknown as ChatMessage[]).reverse());
   }
   unresolved(conversationId: string): ChatTurn | null {
     const row = this.db.prepare("SELECT id FROM chat_turns WHERE conversation_id=? AND status!='succeeded'").get(conversationId);

@@ -1,0 +1,18 @@
+import {DatabaseSync} from 'node:sqlite';
+import {createHash} from 'node:crypto';
+import {mkdtempSync} from 'node:fs';
+import {join} from 'node:path';
+import {createBackup,restoreBackup} from '../../database/backup.js';
+import {assertMigrationHistory,schemaVersion} from '../../database/migrations.js';
+import {preservedTables,assertPreservedTables,databaseFingerprint} from '../../database/fingerprint.js';
+const sql=`CREATE TABLE app_ui_schema(version INTEGER PRIMARY KEY,checksum TEXT NOT NULL) STRICT;
+CREATE TABLE app_ui_settings(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL,anniversary TEXT,accent TEXT NOT NULL) STRICT;
+INSERT INTO app_ui_settings VALUES(1,1,NULL,'#07c160');
+CREATE TABLE app_ui_conversations(conversation_id TEXT PRIMARY KEY REFERENCES chat_conversations(id),pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),deleted_at TEXT) STRICT;
+CREATE TABLE app_ui_world(id TEXT PRIMARY KEY,title TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('html','mcp')),enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),position INTEGER NOT NULL,url TEXT,metadata TEXT NOT NULL) STRICT;`;
+const checksum=createHash('sha256').update(sql).digest('hex');
+export function uiReady(db:DatabaseSync){if(!db.prepare("SELECT 1 FROM sqlite_master WHERE name='app_ui_schema'").get())return false;if(db.prepare('SELECT checksum FROM app_ui_schema WHERE version=1').get()?.checksum!==checksum)throw Error('UI_SCHEMA_MISMATCH');for(const name of ['app_ui_settings','app_ui_conversations','app_ui_world'])if(!db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(name))throw Error('UI_SCHEMA_INCOMPLETE');return true;}
+export function conversationDeleted(db:DatabaseSync,id:string){return uiReady(db)&&!!db.prepare('SELECT 1 FROM app_ui_conversations WHERE conversation_id=? AND deleted_at IS NOT NULL').get(id);}
+export function migrateUi(db:DatabaseSync,verify:()=>void=()=>{},before:()=>void=()=>{}){if(uiReady(db))return;assertMigrationHistory(db);if(schemaVersion(db)!==4)throw Error('UI_REQUIRES_V4');db.exec('BEGIN IMMEDIATE');try{before();db.exec(sql);db.prepare('INSERT INTO app_ui_schema VALUES(1,?)').run(checksum);verify();if(db.prepare('PRAGMA foreign_key_check').all().length)throw Error('UI_FOREIGN_KEY_FAILURE');db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}}
+function writersActive(db:DatabaseSync){return !!db.prepare("SELECT 1 FROM chat_turns WHERE status IN ('queued','running')").get()||!!db.prepare("SELECT 1 FROM sqlite_master WHERE name='memory_live_jobs'").get()&&!!db.prepare("SELECT 1 FROM memory_live_jobs WHERE status IN ('queued','running')").get();}
+export async function upgradeUi(filename:string,backupRoot:string){const source=new DatabaseSync(filename,{readOnly:true});let tables:ReturnType<typeof preservedTables>,fingerprint:string;try{if(uiReady(source))return {changed:false};assertMigrationHistory(source);if(writersActive(source))throw Error('UI_DRAIN_REQUIRED');tables=preservedTables(source);fingerprint=databaseFingerprint(source);}finally{source.close();}const backupDirectory=await createBackup(filename,backupRoot),candidate=await restoreBackup(backupDirectory,join(mkdtempSync(join(backupRoot,'ui-rehearsal-')),'candidate'));const copy=new DatabaseSync(candidate);try{migrateUi(copy,()=>assertPreservedTables(copy,tables!));}finally{copy.close();}const db=new DatabaseSync(filename);try{db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000');migrateUi(db,()=>assertPreservedTables(db,tables!),()=>{if(databaseFingerprint(db)!==fingerprint!||writersActive(db))throw Error('UI_SOURCE_CHANGED');});}finally{db.close();}return {changed:true,backupDirectory,rehearsalDatabase:candidate};}

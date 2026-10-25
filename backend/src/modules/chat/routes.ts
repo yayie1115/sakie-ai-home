@@ -13,7 +13,7 @@ export function chatRouter(service: ChatService, reauthorize?: (req: import('exp
   router.get('/config',(_req,res) => res.json({configured:service.configured,model:service.configured?service.config.model:null,maxMessageChars:service.config.maxMessageChars,memoryStatus:'unavailable',participants:chatParticipants,conversationProfilesEnabled:store.liveReady,groupScheduling:'manual-single-reply',personaConfigured:false}));
   router.get('/conversations',(req,res) => {
     const limit = pageNumber(req.query.limit,20,'limit',1,100), before = pageNumber(req.query.before,Number.MAX_SAFE_INTEGER,'before',1,Number.MAX_SAFE_INTEGER);
-    const rows = store.conversations(before,limit+1); const items = rows.slice(0,limit);
+    const rows = store.conversations(before,limit+1,req.query.q===undefined||req.query.q===''?'':text(req.query.q,'q',100)); const items = rows.slice(0,limit);
     res.json({items,nextBefore:rows.length>limit?items.at(-1)!.cursor:null});
   });
   router.get('/conversations/:id',(req,res) => {

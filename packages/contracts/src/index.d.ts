@@ -33,9 +33,9 @@ export interface ContextAssemblyPort { build(input: { conversationId: string; tr
 export type ChatTurnStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'unknown';
 export interface ChatParticipant { id: string; name: string; }
 export interface ChatConversationProfile { kind: 'private' | 'group'; members: string[]; }
-export interface ChatConversation { id: string; title: string; createdAt: string; profile?: ChatConversationProfile | null; }
+export interface ChatConversation { pinned?:boolean; id: string; title: string; createdAt: string; profile?: ChatConversationProfile | null; }
 export interface ChatTurn { id: string; conversationId: string; clientMessageId: string; turnSeq: number; status: ChatTurnStatus; replyToMemberId?: string | null; errorCode: string | null; createdAt: string; }
-export interface ChatMessage { id: string; turnId: string; messageSeq: number; role: 'user' | 'assistant'; content: string; createdAt: string; revision?: number; speakerId?: string | null; }
+export interface ChatMessage { id: string; turnId: string; messageSeq: number; role: 'user' | 'assistant'; content: string; createdAt: string; revision?: number; speakerId?: string | null; usage?: {inputTokens:number|null;outputTokens:number|null;cacheReadTokens:number|null;cacheWriteTokens:number|null}; }
 export interface ChatHistoryPage { items: ChatMessage[]; nextBefore: number | null; unresolvedTurn: ChatTurn | null; }
 export interface ChatConversationPage { items: (ChatConversation & {cursor:number})[]; nextBefore: number | null; }
 
