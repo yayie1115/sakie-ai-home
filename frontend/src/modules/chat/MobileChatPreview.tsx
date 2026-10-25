@@ -185,8 +185,6 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
     function writeError(e:unknown){return e instanceof ApiError ? '请求未完成：'+e.code+'。请刷新状态后重试。' : '连接中断，结果未知。保留页面，重试会复用同一编号。';}
     async function createConversation(kind:ChatConversationProfile['kind'],members:string[],title:string){
         if(!live||sending.current||!settings.conversationProfilesEnabled)return;
-        const existing=!configuring&&kind==='private'?rooms.find(c=>c.profile?.kind==='private'&&c.profile.members[0]===members[0]):undefined;
-        if(existing){open(existing.id);return;}
         sending.current=true;setWriteBusy(true);
         const key=JSON.stringify({configuring,kind,members,title});
         if(!pendingCreate.current.has(key))pendingCreate.current.set(key,crypto.randomUUID());
