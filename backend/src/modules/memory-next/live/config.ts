@@ -1,0 +1,5 @@
+export function memoryConfig(env:NodeJS.ProcessEnv){
+ const n=(key:string,value:number,min:number,max:number)=>{const x=Number(env[key]??value);if(!Number.isFinite(x)||x<min||x>max||key!=='MEMORY_RELEVANCE_MIN'&&!Number.isSafeInteger(x))throw Error('Invalid '+key);return x;};
+ return {enabled:env.MEMORY_ENABLED!=='false',batchChars:n('MEMORY_BATCH_CHARS',12000,1000,100000),outputTokens:n('MEMORY_OUTPUT_TOKENS',1200,128,4096),maxCandidates:n('MEMORY_MAX_CANDIDATES',4,1,32),recallChars:n('MEMORY_CONTEXT_CHARS',5000,256,20000),autoChars:n('MEMORY_AUTO_CONTEXT_CHARS',2000,128,10000),maxToolCalls:n('MEMORY_TOOL_CALLS',6,0,16),recallLimit:n('MEMORY_RECALL_LIMIT',6,1,20),minScore:n('MEMORY_RELEVANCE_MIN',0.15,0.01,1),pool:n('MEMORY_SEARCH_PAGE',200,10,1000),maxCalls:n('MEMORY_CALLS_PER_DAY',100,0,10000),delayMs:n('MEMORY_JOB_DELAY_MS',2000,100,60000),timeoutMs:n('MEMORY_TIMEOUT_MS',30000,1000,120000),toolRounds:n('MEMORY_TOOL_ROUNDS',2,0,5),halfLifeDays:n('MEMORY_HALF_LIFE_DAYS',120,1,36500),reflectEvery:n('MEMORY_REFLECT_EVERY_TURNS',4,1,1000)};
+}
+export type MemoryConfig=ReturnType<typeof memoryConfig>;

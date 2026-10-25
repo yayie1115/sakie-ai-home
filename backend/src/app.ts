@@ -1,3 +1,5 @@
+import {LiveMemoryRuntime} from './modules/memory-next/live/runtime.js';
+import {liveMemoryRouter} from './modules/memory-next/live/routes.js';
 import { SyncService, SyncError } from './modules/sync/service.js';
 import { syncRouter, deviceRouter } from './modules/sync/routes.js';
 import express, { type ErrorRequestHandler } from 'express';
@@ -24,10 +26,14 @@ export function createApp(db:DatabaseSync,options:{auth?:AuthService;chat?:ChatS
   app.use('/api/sync',syncRouter(sync));
   app.use('/api',(req,res,next)=>{res.setHeader('Cache-Control','no-store');auth.require(req);next();});
   app.use(express.json({limit:'1mb'}));
-  const chat=options.chat??new ChatService(new ChatStore(db),config.chat.apiKey&&config.chat.model?new DeepSeekProvider(config.chat):null,config.chat);
+  const provider=config.chat.apiKey&&config.chat.model?new DeepSeekProvider(config.chat):null;
+  const memory=new LiveMemoryRuntime(db,provider,config.chat);
+  const chat=options.chat??new ChatService(new ChatStore(db),provider,config.chat,memory);
+  app.locals.memory=memory;
+  app.use('/api/memory',liveMemoryRouter(memory));
   app.locals.chat=chat;
   app.use('/api/devices',deviceRouter(sync));
-  app.use('/api/chat',chatRouter(chat,req=>auth.require(req)));
+  app.use('/api/chat',chatRouter(chat,req=>auth.require(req),id=>memory.messageChanged(id)));
   app.use('/api/memories',memoryRouter(db));app.use('/api/diaries',diaryRouter(db));app.use('/api/dreams',dreamRouter(db));app.use('/api/activities',activityRouter(db));
   app.use((_req,res)=>res.status(404).json({error:'NOT_FOUND'}));
   const errorHandler:ErrorRequestHandler=(error,_req,res,_next)=>{

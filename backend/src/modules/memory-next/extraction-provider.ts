@@ -67,3 +67,10 @@ export function parseExtraction(raw: string, maxChars: number, maxCandidates: nu
       ...(value.perspective ? { perspective: value.perspective } : {}) } as ExtractedClaim;
   });
 }
+
+/** Shared strict JSON boundary for live memory tools; preserves the existing MEM-04 rules. */
+export function parseStrictMemoryObject(raw:string,maxChars:number):Record<string,unknown>{
+ if(typeof raw!=='string'||raw.length>maxChars)throw Error('extraction_output_limit');
+ let value:unknown;try{value=JSON.parse(raw);}catch{throw Error('extraction_invalid_json');}
+ rejectDuplicateKeys(raw);object(value);return value;
+}

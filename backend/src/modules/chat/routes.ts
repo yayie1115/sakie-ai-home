@@ -8,7 +8,7 @@ function uuid(value: unknown, field: string): string {
   if(typeof value !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value)) throw new ValidationError('Invalid ' + field);
   return value.toLowerCase();
 }
-export function chatRouter(service: ChatService, reauthorize?: (req: import('express').Request) => unknown) {
+export function chatRouter(service: ChatService, reauthorize?: (req: import('express').Request) => unknown, messageChanged?:(id:string)=>void) {
   const router = Router(), store = service.store;
   router.get('/config',(_req,res) => res.json({configured:service.configured,model:service.configured?service.config.model:null,maxMessageChars:service.config.maxMessageChars,memoryStatus:'unavailable',participants:chatParticipants,conversationProfilesEnabled:store.liveReady,groupScheduling:'manual-single-reply',personaConfigured:false}));
   router.get('/conversations',(req,res) => {
@@ -55,7 +55,7 @@ export function chatRouter(service: ChatService, reauthorize?: (req: import('exp
   for(const method of ['patch','delete'] as const) router[method]('/messages/:id',(req,res)=>{
     const body=objectBody(req.body);if(!Number.isSafeInteger(body.baseRevision)||Number(body.baseRevision)<1)throw new ValidationError('Invalid baseRevision');
     if(method==='patch')text(body.content,'content',100000);
-    res.json(reviseMessage(store.db,uuid(req.params.id,'messageId'),Number(body.baseRevision),uuid(body.requestId,'requestId'),method==='delete'?null:body.content as string));
+    const id=uuid(req.params.id,'messageId');const result=reviseMessage(store.db,id,Number(body.baseRevision),uuid(body.requestId,'requestId'),method==='delete'?null:body.content as string);messageChanged?.(id);res.json(result);
   });
   router.get('/turns/:id',async(req,res) => {
     const id = uuid(req.params.id,'turnId');

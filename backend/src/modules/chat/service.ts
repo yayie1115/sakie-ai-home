@@ -1,3 +1,4 @@
+import type {ChatMemory} from '../memory-next/live/chat-bridge.js';
 import { randomUUID } from 'node:crypto';
 import type { ClientMessage, ChatTurn } from '@sakie/contracts';
 import type { ChatConfig } from './config.js';
@@ -10,6 +11,7 @@ export class ChatService {
   private preview: {turnId:string;content:string;started:number;firstTokenMs:number|null} | null = null;
   private readonly timings = new Map<string,{modelMs:number;firstTokenMs:number|null}>();
   progress(turnId:string) {
+    if(this.preview?.turnId===turnId){try{this.memory?.assertCurrent(this.store.turn(turnId));}catch{this.preview=null;this.controller?.abort(new ModelError('MEMORY_SOURCES_CHANGED','unknown'));return null;}}
     return this.preview?.turnId===turnId ? {content:this.preview.content,firstTokenMs:this.preview.firstTokenMs} : null;
   }
   timing(turnId:string) { return this.timings.get(turnId) ?? null; }
@@ -47,7 +49,7 @@ export class ChatService {
   private stopped = false;
   private started = false;
   private controller: AbortController | null = null;
-  constructor(readonly store: ChatStore, private provider: ModelProvider | null, readonly config: ChatConfig) {}
+  constructor(readonly store: ChatStore, private provider: ModelProvider | null, readonly config: ChatConfig, private memory?:ChatMemory) {memory?.onInvalidate(id=>{if(this.preview?.turnId===id){this.preview=null;this.controller?.abort(new ModelError('MEMORY_SOURCES_CHANGED','unknown'));this.notify(id);}});}
   get configured() { return this.provider !== null; }
   start() {
     if(this.started) return;
@@ -117,30 +119,52 @@ export class ChatService {
       this.notify(turn.id);
       try {
         const messages = assembleContext(this.store,turn.id,this.config);
+        if(this.memory?.isEnabled()){
+          // Keep existing persona/config messages unchanged; replace only the obsolete unavailable marker.
+          const marker=messages.findIndex(m=>m.role==='system'&&m.content.startsWith('当前长期记忆和 Windows 归档检索不可用'));
+          if(marker>=0)messages.splice(marker,1);
+          messages.splice(messages.length-1,0,...this.memory.context(turn));
+        }
         // Enforce deadline even for replaceable providers that fail to honor cancellation.
         const deadline = new Promise<never>((_resolve,reject) => {
-          const abort = () => reject(new ModelError(this.stopped ? 'PROCESS_INTERRUPTED' : 'MODEL_TIMEOUT','unknown'));
+          const abort = () => reject(controller.signal.reason instanceof ModelError?controller.signal.reason:new ModelError(this.stopped ? 'PROCESS_INTERRUPTED' : 'MODEL_TIMEOUT','unknown'));
           controller.signal.addEventListener('abort',abort,{once:true});
           timer = setTimeout(() => controller.abort(),this.config.timeoutMs);
         });
-        reply = await Promise.race([this.provider.complete(messages,controller.signal,content=>{
+        const tools=this.memory?.tools(turn)??[];let rounds=0;
+        let accumulated:ProviderUsage|undefined;
+        while(true){
+        try{this.memory?.assertCurrent(turn);}catch{throw new ModelError('MEMORY_SOURCES_CHANGED','failed',accumulated);}
+        try{reply = await Promise.race([this.provider.complete(messages,controller.signal,content=>{
           if(controller.signal.aborted||this.preview?.turnId!==turn.id)return;
           this.preview.content=content;
           if (!this.progressTimer) this.progressTimer = setTimeout(() => { this.progressTimer=undefined; this.notify(turn.id); }, 100);
           if(content&&this.preview.firstTokenMs===null)this.preview.firstTokenMs=Math.round(performance.now()-this.preview.started);
-        }),deadline]);
+        },tools.length&&rounds<(this.memory?.maxToolRounds??0)?{tools}:undefined),deadline]);}catch(e){if(rounds===0&&tools.length&&e instanceof ModelError&&['MODEL_HTTP_400','MODEL_HTTP_422'].includes(e.code)){tools.length=0;messages.push({role:'system',content:'主动记忆工具本轮不可用。仅使用已提供的获准资料与近期对话，不声称完成了主动检索。'});continue;}throw e;}
+        const usage=reply.usage;accumulated=accumulated?{inputTokens:sum(accumulated.inputTokens,usage.inputTokens),outputTokens:sum(accumulated.outputTokens,usage.outputTokens),cacheReadTokens:sum(accumulated.cacheReadTokens,usage.cacheReadTokens),cacheWriteTokens:sum(accumulated.cacheWriteTokens,usage.cacheWriteTokens),cacheMissTokens:sum(accumulated.cacheMissTokens??null,usage.cacheMissTokens??null)}:usage;
+        if(!reply.toolCalls?.length){try{this.memory?.assertCurrent(turn);}catch{throw new ModelError('MEMORY_SOURCES_CHANGED','failed',accumulated);}reply={...reply,usage:accumulated};break;}
+        if(!tools.length||++rounds>(this.memory?.maxToolRounds??0))throw new ModelError('MEMORY_TOOL_BUDGET_EXCEEDED','failed',accumulated);
+        messages.push({role:'assistant',content:reply.content,tool_calls:reply.toolCalls});
+        this.preview.content='';
+        for(const call of reply.toolCalls){if(!tools.some(t=>t.function.name===call.function.name))throw new ModelError('MODEL_UNKNOWN_TOOL','failed',accumulated);
+          const result=await this.memory!.runTool(turn,call.function.name,call.function.arguments);messages.push({role:'tool',tool_call_id:call.id,content:result});}
+        }
+
       } catch(error) {
         const failure = error instanceof ModelError ? error : new ModelError('MODEL_CALL_FAILED','unknown');
         this.finishFailure(turn,attemptId,failure); continue;
       } finally { if(timer) clearTimeout(timer); if(this.progressTimer){clearTimeout(this.progressTimer);this.progressTimer=undefined;} this.controller = null; this.rememberTiming(turn.id); }
       // Persist reply, successful outcome and outbox atomically; a DB error must not be reported as a supplier error.
-      this.store.transaction(() => {
+      try{this.store.transaction(() => {
+        try{this.memory?.assertCurrent(turn);}catch{throw new ModelError('MEMORY_SOURCES_CHANGED','failed',reply.usage);}
         const now = new Date().toISOString();
         this.store.appendMessage({id:randomUUID(),conversationId:turn.conversationId,turnId:turn.id,messageSeq:turn.turnSeq*2,role:'assistant',content:reply.content,createdAt:now});
         this.store.db.prepare("UPDATE chat_turns SET status='succeeded',error_code=NULL,updated_at=? WHERE id=?").run(now,turn.id);
         this.store.db.prepare("UPDATE chat_attempts SET status='succeeded',finished_at=?,provider_request_id=? WHERE id=?").run(now,reply.requestId,attemptId);
         this.recordUsage(attemptId,reply.usage);
-      });
+        this.memory?.completed(turn);
+      });}catch(e){if(e instanceof ModelError&&e.code==='MEMORY_SOURCES_CHANGED'){this.finishFailure(turn,attemptId,e);continue;}throw e;}
+      this.memory?.release(turn.id);
       this.notify(turn.id);
     }
   }
@@ -154,6 +178,8 @@ export class ChatService {
       this.store.db.prepare('UPDATE chat_attempts SET status=?,error_code=?,finished_at=? WHERE id=?').run(failure.outcome,failure.code,now,attemptId);
       this.recordUsage(attemptId,failure.usage);
     });
-    this.notify(turn.id);
+    this.memory?.release(turn.id);this.notify(turn.id);
   }
 }
+
+function sum(a:number|null,b:number|null){return a===null||b===null?null:a+b;}

@@ -10,6 +10,7 @@ import './group-chat-preview.css';
 import './m0/mobile-chat.css';
 const ConversationCreator=lazy(()=>import('./v11/ConversationCreator').then(m=>({default:m.ConversationCreator})));
 const ConversationDetailsFrame=lazy(()=>import('./v11/ConversationDetailsFrame').then(m=>({default:m.ConversationDetailsFrame})));
+const MemoryPanel=lazy(()=>import('./v11/MemoryPanel').then(m=>({default:m.MemoryPanel})));
 const base = '/api/chat';
 type Settings={configured:boolean;maxMessageChars:number;model?:string;participants?:ChatParticipant[];conversationProfilesEnabled?:boolean};
 type PendingSend={clientMessageId:string;content?:string;time:number;replyToMemberId?:string};
@@ -39,6 +40,7 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
     const [composers, setComposers] = useState<Record<string, Composer>>({}), [scrolled, setScrolled] = useState<Record<string, boolean>>({});
     const [settings, setSettings] = useState<Settings>({configured:false,maxMessageChars:12000});
     const [turns,setTurns] = useState<Record<string,ChatTurn|null>>({});
+    const [memoryOpen,setMemoryOpen]=useState(false);
     const [creating,setCreating]=useState(false),[configuring,setConfiguring]=useState<string|null>(null);
     const [responders,setResponders]=useState<Record<string,string>>({});
     const [progress,setProgress]=useState<Record<string,string>>({});
@@ -160,7 +162,7 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
     const pendingSend = selected ? pendingRequests.has(selected) : false;
     const composer = selected ? composers[selected] ?? emptyComposer() : emptyComposer();
     const unresolved = !!turn && turn.status !== 'succeeded';
-    const statusText = !online ? '网络已断开；已保存消息不受影响，恢复连接后会重新核对状态。' : pendingSend ? '发送结果未确认；重试将使用同一消息编号。请勿关闭页面。' : turn ? ({queued:'消息已保存，等待回复',running:'消息已保存，正在回复',succeeded:'回复已保存',failed:'回复失败；用户消息已保存',unknown:'上次调用结果未知；用户消息已保存'}[turn.status]+(turn.errorCode?'（'+turn.errorCode+'）':'')) : settings.configured ? '发送将调用后端配置的模型。长期记忆暂不可用。' : '后端模型未配置；历史可读取，发送已禁用。';
+    const statusText = !online ? '网络已断开；已保存消息不受影响，恢复连接后会重新核对状态。' : pendingSend ? '发送结果未确认；重试将使用同一消息编号。请勿关闭页面。' : turn ? ({queued:'消息已保存，等待回复',running:'消息已保存，正在回复',succeeded:'回复已保存',failed:'回复失败；用户消息已保存',unknown:'上次调用结果未知；用户消息已保存'}[turn.status]+(turn.errorCode?'（'+turn.errorCode+'）':'')) : settings.configured ? '发送将调用后端配置的模型。长期记忆按会话授权使用。' : '后端模型未配置；历史可读取，发送已禁用。';
     useEffect(()=>{
         if(!live||!online||!selected||!turn||!['queued','running'].includes(turn.status)||!visible)return;
         const id=selected,turnId=turn.id,controller=new AbortController();let active=true,cursor:string|undefined,failures=0;
@@ -240,7 +242,7 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
         throw Error('来源已失效'); const page = await api<ChatHistoryPage>(base + '/conversations/' + selected + '/messages?limit=1&before=' + (source.messageSeq + 1)); const current = page.items.find(row => row.id === m.id); if (!current || (current.revision ?? 1) !== m.sourceRef?.revision)
         throw Error('来源已变更，请刷新后复制'); if(selectedRef.current!==selected)throw Error('会话已切换'); return current.content; }
     return <div className={'m0-shell ' + (dark ? 'dark' : '') + (drawer ? ' nav-open' : '')}>
-  <aside className="m0-drawer" aria-label="主导航侧栏" aria-hidden={!drawer} inert={!drawer}><button onClick={() => { setDrawer(false); restoreNavigationFocus(); }} aria-label="关闭主导航">关闭 ‹</button><nav aria-label="侧栏导航"><button disabled title="尚未接通">Home · 未开放</button><button aria-current="page" onClick={() => { setDrawer(false); navigate(route); }}>Chat</button><button disabled title="尚未接通">World · 未开放</button></nav><button onClick={() => setDark(d => !d)}>{dark ? '浅色外观' : '深色外观'}</button><button disabled={session.busy} onClick={() => void session.logout()}>退出登录</button><small>{live ? '正式聊天 · 同源认证\n长期记忆暂未接入' : '独立测试 · 只读\n模型调用关闭'}</small></aside>
+  <aside className="m0-drawer" aria-label="主导航侧栏" aria-hidden={!drawer} inert={!drawer}><button onClick={() => { setDrawer(false); restoreNavigationFocus(); }} aria-label="关闭主导航">关闭 ‹</button><nav aria-label="侧栏导航"><button disabled title="尚未接通">Home · 未开放</button><button aria-current="page" onClick={() => { setDrawer(false); navigate(route); }}>Chat</button><button disabled title="尚未接通">World · 未开放</button></nav><button onClick={() => setDark(d => !d)}>{dark ? '浅色外观' : '深色外观'}</button><button disabled={session.busy} onClick={() => void session.logout()}>退出登录</button><small>{live ? '正式聊天 · 同源认证\n记忆按来源授权使用' : '独立测试 · 只读\n模型调用关闭'}</small></aside>
   <div className="m0-content"><section className={'v11-workspace m0-workspace ' + (dark ? 'dark ' : '') + (selected||creating ? 'show-chat' : 'show-list')} aria-label={live ? "小家聊天" : "小家 M0 独立测试聊天"}>
    <aside className="v11-sidebar" aria-label="会话列表"><header className="v11-side-head"><div><button ref={navigation} className="v11-icon" aria-label="打开主导航" aria-expanded={drawer} onClick={() => setDrawer(d => !d)}>☰</button><h2>Chat</h2><div><button className="v11-icon" disabled title="会话回收站尚未接通" aria-label="会话回收站未开放">♲</button><button className="v11-icon" disabled={!live||writeBusy||!settings.conversationProfilesEnabled} onClick={() => {setCreating(true);setConfiguring(null);}} title={live?"新建会话":"新建会话待后续授权"} aria-label={live?"新建会话":"新建会话未开放"}>＋</button></div></div><input aria-label="搜索会话" placeholder="搜索已加载会话" value={query} onChange={e => setQuery(e.target.value)}/></header>
     <div ref={listScroll} className="v11-room-list" onScroll={e => { if (e.currentTarget.clientHeight > 0)
@@ -253,6 +255,8 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
 
     {live&&selected&&loadedFor===selected&&<div className="live-chat-status" role="status">{statusText}{pendingSend&&<button disabled={writeBusy||historyBusy||!online||(!pendingRequests.get(selected??'')?.content&&!composer.draft.trim())} onClick={()=>void send()}>确认或重发同一请求</button>}{turn&&['failed','unknown'].includes(turn.status)&&<button disabled={writeBusy||!online||!settings.configured} onClick={()=>void retryReply()}>重试回复{turn.status==='unknown'?'（可能再次计费）':''}</button>}<button disabled={historyBusy||writeBusy||!online} onClick={()=>void historyPage()}>刷新状态</button></div>}
     {historyError && loadedFor === room?.id && !details && <p role="alert" className="m0-history-error">{historyError}</p>}
+    {live&&room&&<div className="memory-actions"><button onClick={()=>setMemoryOpen(true)}>长期记忆 · 查看与纠正</button></div>}
+    {live&&room&&memoryOpen&&<Suspense fallback={<p role="status">正在打开记忆…</p>}><MemoryPanel key={room.id} conversationId={room.id} participants={settings.participants??[]} onClose={()=>setMemoryOpen(false)}/></Suspense>}
     {live&&room&&!conversation?.profile&&<div className="live-chat-status" role="status">历史会话沿用原聊天配置；成员归属未标注，不影响继续聊天。<button disabled={!settings.conversationProfilesEnabled||writeBusy||unresolved} onClick={()=>{setConfiguring(room.id);setCreating(true);}}>设置会话成员</button></div>}
     {creating&&<Suspense fallback={<p role="status">正在加载会话设置…</p>}><ConversationCreator participants={settings.participants??[]} busy={writeBusy} heading={configuring?'设置会话成员':'新建会话'} onCreate={createConversation} onClose={()=>{setCreating(false);setConfiguring(null);}}/></Suspense>}
     {details&&room&&!creating&&<Suspense fallback={<p role="status">正在加载会话详情…</p>}><ConversationDetailsFrame kind={room.kind} onBack={back}>

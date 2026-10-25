@@ -11,3 +11,4 @@ body.m0-page{margin:0;overflow:hidden;overscroll-behavior:none;background:#f4f7f
 @media(prefers-reduced-motion:reduce){.m0-shell{transition:none}}
 
 .live-chat-status{flex:none;padding:6px 12px;font-size:12px;line-height:1.5;color:#718594}.live-chat-status button{margin-left:8px}
+.memory-panel .memory-actions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.memory-panel .memory-entry{padding:12px 0;border-bottom:1px solid #dbe4e9;overflow-wrap:anywhere}.memory-panel p{white-space:pre-wrap;line-height:1.6}.memory-panel input,.memory-panel textarea,.memory-panel select{max-width:100%;font:inherit;box-sizing:border-box}.memory-panel textarea{width:100%;min-height:90px}.memory-panel label{display:block;margin:8px 0}.memory-panel small{display:block;color:#718594}
