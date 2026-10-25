@@ -147,7 +147,9 @@ export class ChatService {
         messages.push({role:'assistant',content:reply.content,tool_calls:reply.toolCalls});
         this.preview.content='';
         for(const call of reply.toolCalls){if(!tools.some(t=>t.function.name===call.function.name))throw new ModelError('MODEL_UNKNOWN_TOOL','failed',accumulated);
-          const result=await this.memory!.runTool(turn,call.function.name,call.function.arguments);messages.push({role:'tool',tool_call_id:call.id,content:result});}
+          const result=await this.memory!.runTool(turn,call.function.name,call.function.arguments);
+          const outcome=JSON.parse(result) as {status?:string;error?:string};console.info(JSON.stringify({event:'memory_tool_result',tool:call.function.name,status:outcome.status??'ok',...(outcome.error&&/^[A-Z_]+$/.test(outcome.error)?{code:outcome.error}:{})}));
+          messages.push({role:'tool',tool_call_id:call.id,content:result});}
         }
 
       } catch(error) {

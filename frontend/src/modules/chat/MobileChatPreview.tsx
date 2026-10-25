@@ -162,7 +162,7 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
     const pendingSend = selected ? pendingRequests.has(selected) : false;
     const composer = selected ? composers[selected] ?? emptyComposer() : emptyComposer();
     const unresolved = !!turn && turn.status !== 'succeeded';
-    const statusText = !online ? '网络已断开；已保存消息不受影响，恢复连接后会重新核对状态。' : pendingSend ? '发送结果未确认；重试将使用同一消息编号。请勿关闭页面。' : turn ? ({queued:'消息已保存，等待回复',running:'消息已保存，正在回复',succeeded:'回复已保存',failed:'回复失败；用户消息已保存',unknown:'上次调用结果未知；用户消息已保存'}[turn.status]+(turn.errorCode?'（'+turn.errorCode+'）':'')) : settings.configured ? '发送将调用后端配置的模型。长期记忆按会话授权使用。' : '后端模型未配置；历史可读取，发送已禁用。';
+    const statusText = !online ? '网络已断开；已保存消息不受影响，恢复连接后会重新核对状态。' : pendingSend ? '发送结果未确认；重试将使用同一消息编号。请勿关闭页面。' : turn ? ({queued:'消息已保存，等待回复',running:'消息已保存，正在回复',succeeded:'回复已保存',failed:'回复失败；用户消息已保存',unknown:'上次调用结果未知；用户消息已保存'}[turn.status]+(turn.errorCode?'（'+turn.errorCode+'）':'')) : settings.configured ? '' : '后端模型未配置；历史可读取，发送已禁用。';
     useEffect(()=>{
         if(!live||!online||!selected||!turn||!['queued','running'].includes(turn.status)||!visible)return;
         const id=selected,turnId=turn.id,controller=new AbortController();let active=true,cursor:string|undefined,failures=0;
@@ -263,7 +263,7 @@ export function MobileChatPreview({ live = false }: { live?: boolean }) {
       <div className="v11-setting"><span>当前模型<small>{live?'成员使用现有共用模型服务':'模型未启用'}</small></span><span>{live?(settings.model||'未配置'):'未启用'}</span></div>
       {room.kind==='group'&&<><div className="v11-setting"><span>成员管理</span><button disabled title="成员变更和历史权限尚未接通">未开放</button></div><div className="v11-setting"><span>群内自主发言</span><button disabled title="当前仅用户指定成员的单次回复">未接通</button></div></>}
       <h3>聊天内容</h3>{historyError&&<p className="m0-history-error" role="alert">{historyError}</p>}<p>创建时间：{new Date(conversation!.createdAt).toLocaleString()}</p>{['修改备注','搜索全部历史','图片与文件','默认音色','编辑与重生成'].map(label=><div className="v11-setting" key={label}><span>{label}</span><button disabled>未开放</button></div>)}
-      <p className="v11-disclaimer">{live?'消息来自真实聊天服务。成员选择与回复归属已保存；独立人格、长期记忆、多 AI 自主调度尚未接通。':'独立只读测试，不写入、不调用模型。'}</p>
+      <p className="v11-disclaimer">{live?'消息来自真实聊天服务。成员选择与回复归属已保存；长期记忆按授权使用；独立人格、多 AI 自主调度尚未接通。':'独立只读测试，不写入、不调用模型。'}</p>
     </ConversationDetailsFrame></Suspense>}
 
    </div>{notice && <div role="status" className="v11-toast">{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div>}

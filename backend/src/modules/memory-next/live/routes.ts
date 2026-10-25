@@ -22,11 +22,7 @@ export function liveMemoryRouter(memory:LiveMemoryRuntime){
  router.get('/events',(req,res)=>res.json({items:memory.store.events(context(req.query))}));
  router.post('/events/:id/revisions',(req,res)=>{const b=objectBody(req.body),c=context(b);const result={id:memory.store.transaction(()=>memory.store.reviseEvent(c,String(req.params.id),b.parentId===null?null:text(b.parentId,'parentId',100),stringIds(b.entryIds),eventPayload(b),'user'))};memory.invalidate();res.json(result);});
  router.post('/events/:id/approve',(req,res)=>{
-  const b=objectBody(req.body),c=context(b),event=memory.store.events(c,{id:String(req.params.id)}).find(e=>e.id===req.params.id),revision=event?.revisions.find(r=>r.id===b.revisionId&&r.status==='pending');
-  if(!event||!revision)throw new MemoryError(404,'EVENT_PROPOSAL_NOT_AVAILABLE');
-  const current=event.revisions.filter(r=>r.status==='active').at(-1);
-  if((current?.id??null)!==revision.parentId)throw new MemoryError(409,'EVENT_VERSION_CONFLICT');
-  memory.db.prepare("UPDATE memory_live_event_revisions SET status='active' WHERE id=? AND status='pending'").run(revision.id);memory.invalidate();res.json({approved:true});
+  const b=objectBody(req.body),c=context(b);const result=memory.store.approveEvent(c,String(req.params.id),text(b.revisionId,'revisionId',200));memory.invalidate();res.json(result);
  });
  router.get('/jobs',(req,res)=>{const c=context(req.query);res.json({items:memory.db.prepare('SELECT id,status,channel,error_code,created_at FROM memory_live_jobs WHERE conversation_id=? AND actor=? ORDER BY rowid DESC LIMIT 50').all(c.conversationId,c.actor)});});
  router.post('/backfill',(req,res)=>{const b=objectBody(req.body),c=context(b);res.json({...memory.backfill(c,b.before===undefined?undefined:pageNumber(b.before,Number.MAX_SAFE_INTEGER,'before',1,Number.MAX_SAFE_INTEGER)),notice:'仅排队获准历史；后台整理受预算约束，调用可能计费。'});});

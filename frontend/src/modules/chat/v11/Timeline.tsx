@@ -77,7 +77,7 @@ export function Timeline(props:Props){
            <button onClick={close}>关闭</button>
          </>}
        </div>}
-       {m.delivery?<small className="v11-pending-label">{m.delivery==='sending'?'正在发送 · 尚未确认保存':'正在生成 · 尚未保存'}</small>:m.pending?<small className="v11-pending-label">待提交</small>:array[i+1]?.turnId!==m.turnId&&<small className="v11-meta">{new Date(m.time).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}{m.author!=='me'&&!readOnly?' · Token / 缓存统计未提供':''}</small>}
+       {m.delivery?<small className="v11-pending-label">{m.delivery==='sending'?'正在发送 · 尚未确认保存':'正在生成 · 尚未保存'}</small>:m.pending?<small className="v11-pending-label">待提交</small>:array[i+1]?.turnId!==m.turnId&&<small className="v11-meta">{new Date(m.time).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}{m.author!=='me'&&!readOnly&&!props.live?' · Token / 缓存统计未提供':''}</small>}
        {m.versions.length>1&&<small className="v11-meta">版本 {m.version+1}/{m.versions.length}</small>}
      </Bubble>)}
      {!all.length&&<p className="v11-empty">{readOnly?'此测试会话暂无已保存消息':'还没有消息，发出第一句问候吧。'}</p>}

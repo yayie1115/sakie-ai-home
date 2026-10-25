@@ -139,6 +139,25 @@ export class LiveMemoryStore{
    const current=revisions.filter(r=>r.status==='active').at(-1);return revisions.length?[{id:String(event.id),title:String(event.title),revisions:revisions.map(r=>r.status==='active'&&r!==current?{...r,status:'historical'}:r)}]:[];
   });
  }
+ /** Caller holds the transaction and rechecks captured source versions before proposing. */
+ proposeEvent(c:MemoryContext,id:string,title:string|undefined,entryIds:string[],payload:Parameters<LiveMemoryStore['reviseEvent']>[4]){
+  if(!entryIds.length||entryIds.length>20)throw new MemoryError(400,'INVALID_EVENT_SOURCES');
+  const sources=[...new Set(entryIds)].map(id=>{const row=this.entry(id),view=row&&this.view(row,c);if(!view)throw new MemoryError(403,'EVENT_SOURCE_DENIED');return view;});
+  const existing=this.db.prepare('SELECT * FROM memory_live_events WHERE id=?').get(id);
+  if(existing){if(existing.actor!==c.actor||existing.realm!==c.realm||existing.root_entry_id!==sources[0].id)throw new MemoryError(409,'EVENT_ID_CONFLICT');return id;}
+  if(title!==undefined&&(!title.trim()||title.length>100))throw new MemoryError(400,'INVALID_EVENT_TITLE');
+  this.db.prepare('INSERT INTO memory_live_events VALUES(?,?,?,?,?,?)').run(id,c.actor,c.realm,title??sources[0].statement.slice(0,100),sources[0].id,new Date().toISOString());
+  this.db.prepare('INSERT INTO memory_live_event_revisions VALUES(?,?,NULL,?,?,?,?,?)').run(randomUUID(),id,JSON.stringify(payload),JSON.stringify(sources.map(s=>({id:s.id,version:s.version}))),'pending','autonomous',new Date().toISOString());return id;
+ }
+ approveEvent(c:MemoryContext,id:string,revisionId:string){return this.transaction(()=>{
+  const event=this.events(c,{id}).find(e=>e.id===id),revision=event?.revisions.find(r=>r.id===revisionId);
+  if(!event||!revision)throw new MemoryError(404,'EVENT_PROPOSAL_NOT_AVAILABLE');
+  const current=event.revisions.filter(r=>r.status==='active').at(-1);
+  if(revision.status==='active'&&current?.id===revision.id)return {approved:true};
+  if(revision.status!=='pending')throw new MemoryError(409,'EVENT_PROPOSAL_NOT_CURRENT');
+  if((current?.id??null)!==revision.parentId)throw new MemoryError(409,'EVENT_VERSION_CONFLICT');
+  this.db.prepare("UPDATE memory_live_event_revisions SET status='active' WHERE id=? AND status='pending'").run(revision.id);return {approved:true};
+ });}
  reviseEvent(c:MemoryContext,eventId:string,parentId:string|null,entryIds:string[],payload:{state:string;unresolved:string[];understanding:string;cause?:string;turningPoints?:string[]},channel:'user'|'autonomous'){
   const event=this.events(c,{id:eventId}).find(e=>e.id===eventId);if(!event)throw new MemoryError(404,'EVENT_NOT_AVAILABLE');
   const current=event.revisions.filter(r=>r.status==='active').at(-1);if((current?.id??null)!==parentId)throw new MemoryError(409,'EVENT_VERSION_CONFLICT');
