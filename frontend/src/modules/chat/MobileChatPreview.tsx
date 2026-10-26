@@ -109,7 +109,7 @@ export function MobileChatPreview({ live = false,embedded=false,uiReady=false }:
             mergeMessages(id,result.messages);setTurns(old=>({...old,[id]:result.turn}));
             const c=composersRef.current[id];if(c){const next={...composersRef.current,[id]:{...c,...(p.batch?{pending:c.pending.filter(m=>!p.batch!.some(b=>b.id===m.id))}:p.content===c.draft?{draft:''}:{})}};sessionStorage.setItem(draftsKey,JSON.stringify(next));setComposers(next);}
             const remaining=new Map(pendingRequests);remaining.delete(id);rememberPending(remaining,!!p.batch);pendingRequests.delete(id);
-            if(selectedRef.current===id)setNotice('消息已确认保存，已恢复服务端状态。');
+            if(selectedRef.current===id)setNotice('');
         }catch(e){
             if(signal?.aborted)return;
             if(e instanceof ApiError&&e.code==='RECEIPT_NOT_FOUND'){
@@ -215,7 +215,7 @@ export function MobileChatPreview({ live = false,embedded=false,uiReady=false }:
        write:request=>{pendingRequests.set(id,{clientMessageId:request.submissionId,batch:request.bubbles,time:previous?.time??Date.now(),replyToMemberId:previous?.replyToMemberId??replyMemberId});rememberPending(pendingRequests,true);},
        clear:()=>{const next=new Map(pendingRequests);next.delete(id);rememberPending(next,true);pendingRequests.delete(id);}
       });
-      try{sessionStorage.setItem(draftsKey,JSON.stringify(composersRef.current));const receipt=await client.submit(id,bubbles);const current=composersRef.current[id]??emptyComposer(),next={...composersRef.current,[id]:{...current,pending:current.pending.filter(m=>!receipt.bubbleIds.includes(m.id))}};sessionStorage.setItem(draftsKey,JSON.stringify(next));setComposers(next);client.confirm(receipt);const saved=(receipt as V11SubmissionReceipt&{messages?:ChatMessage[]}).messages;if(saved)mergeMessages(id,saved);setTurns(old=>({...old,[id]:receipt.turn}));setNotice('整批消息已确认保存。');}catch(e){setNotice(e instanceof DefinitiveSubmissionRejection||e instanceof Error&&/^(无法持久|服务端持久|待确认)/.test(e.message)?e.message:writeError(e));await reconcilePending(id).catch(()=>{});}finally{sending.current=false;setWriteBusy(false);}
+      try{sessionStorage.setItem(draftsKey,JSON.stringify(composersRef.current));const receipt=await client.submit(id,bubbles);const current=composersRef.current[id]??emptyComposer(),next={...composersRef.current,[id]:{...current,pending:current.pending.filter(m=>!receipt.bubbleIds.includes(m.id))}};sessionStorage.setItem(draftsKey,JSON.stringify(next));setComposers(next);client.confirm(receipt);const saved=(receipt as V11SubmissionReceipt&{messages?:ChatMessage[]}).messages;if(saved)mergeMessages(id,saved);setTurns(old=>({...old,[id]:receipt.turn}));setNotice('');}catch(e){setNotice(e instanceof DefinitiveSubmissionRejection||e instanceof Error&&/^(无法持久|服务端持久|待确认)/.test(e.message)?e.message:writeError(e));await reconcilePending(id).catch(()=>{});}finally{sending.current=false;setWriteBusy(false);}
     }
     async function send(){
         if(composer.pending.length||pendingRequests.get(selected??'')?.batch){await sendBatch();return;}
