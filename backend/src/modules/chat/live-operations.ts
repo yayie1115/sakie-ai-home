@@ -33,7 +33,10 @@ export function messageVersions(store: ChatStore, id: string) {
             versions.set(Number(p.revision ?? 1), String(p.content));
     }
     versions.set(m.revision, m.content);
-    return { id, currentRevision: m.revision, items: [...versions].sort(([a], [b]) => a - b).map(([revision, content]) => ({ revision, content })) };
+    const selections=store.db.prepare("SELECT result_json FROM sync_mutations WHERE json_extract(result_json,'$.id')=? AND json_type(result_json,'$.selectedVersionRevision')='integer'").all(id);
+    const origins=new Map<number,number>();for(const row of selections){const result=JSON.parse(String(row.result_json));origins.set(Number(result.revision),Number(result.selectedVersionRevision));}
+    let activeVersionRevision=m.revision;const seen=new Set<number>();while(origins.has(activeVersionRevision)){if(seen.has(activeVersionRevision))throw new ChatError(503,'VERSION_HISTORY_INVALID');seen.add(activeVersionRevision);activeVersionRevision=origins.get(activeVersionRevision)!;}
+    return {id,currentRevision:m.revision,activeVersionRevision,items:[...versions].filter(([revision])=>!origins.has(revision)).sort(([a],[b])=>a-b).map(([revision,content])=>({revision,content}))};
 }
 export function selectMessageVersion(store: ChatStore, id: string, baseRevision: number, revision: number, requestId: string) {
     return store.transaction(() => {
@@ -53,8 +56,9 @@ export function selectMessageVersion(store: ChatStore, id: string, baseRevision:
         const childId = child.slice(0, 8) + '-' + child.slice(8, 12) + '-4' + child.slice(13, 16) + '-a' + child.slice(17, 20) + '-' + child.slice(20, 32);
         const result = reviseSegment(store.db, id, baseRevision, childId, old.content, false) ?? reviseMessage(store.db, id, baseRevision, childId, old.content, false);
         // Persist selection with the revision in one transaction by the public wrapper below.
-        saveMutation(store.db, requestId, request, result);
-        return result;
+        const selected={...result,selectedVersionRevision:old.revision};
+        saveMutation(store.db, requestId, request, selected);
+        return selected;
     });
 }
 const sql = `CREATE TABLE chat_live_ops_schema(version INTEGER PRIMARY KEY,checksum TEXT NOT NULL) STRICT;
@@ -132,4 +136,9 @@ export class LiveOperations {
     next() { return this.ready ? this.store.db.prepare("SELECT id FROM chat_live_generations WHERE status='pending' ORDER BY rowid LIMIT 1").get() : undefined; }
     cancel(id: string) { const current = this.view(id); if (['pending', 'running'].includes(current.status))
         this.store.db.prepare("UPDATE chat_live_generations SET status='cancelled',error_code='USER_CANCELLED',updated_at=? WHERE id=? AND status IN ('pending','running')").run(new Date().toISOString(), id); return this.view(id); }
+}
+
+/** API-only metadata: no extra network request per bubble and no mutation of saved text. */
+export function withVersionNavigation(store:ChatStore,messages:import('@sakie/contracts').ChatMessage[]){
+ return messages.map(m=>{if((m.revision??1)<=1)return m;const history=messageVersions(store,m.id),index=history.items.findIndex(v=>v.revision===history.activeVersionRevision);if(index<0)throw new ChatError(503,'VERSION_HISTORY_INCOMPLETE');return {...m,versionNavigation:{index:index+1,total:history.items.length,previousRevision:history.items[index-1]?.revision,nextRevision:history.items[index+1]?.revision}};});
 }

@@ -9,3 +9,10 @@
 /* Keep Safari native text callouts from competing with conversation actions. */
 .part03 .v11-conversation{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;touch-action:pan-y}
 .wx-history-loading{padding:18px 12px;display:grid;gap:16px;opacity:.32;pointer-events:none}.wx-history-loading span{display:block;background:#cdd1ce;width:40%;height:32px;border-radius:6px}.wx-history-loading span:nth-child(2){justify-self:end;width:30%}
+
+/* Four Chat interaction refinements: click menus, saved version arrows and system rows. */
+.part03 .v11-bubble{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;touch-action:manipulation;cursor:pointer}
+.wx-bubble-menu{position:fixed;z-index:60;width:min(320px,calc(100vw - 24px));max-width:calc(100vw - 16px);margin:0;overflow:auto;overscroll-behavior:contain}
+.wx-version-nav{display:flex;align-items:center;gap:5px;font-size:11px;color:#999;margin-top:3px;line-height:1}
+.wx-version-nav button{background:transparent;color:inherit;font-size:20px;min-width:28px;min-height:28px;padding:2px 6px}
+.wx-version-nav button:disabled{opacity:.25}.wx-system-event{text-align:center;color:#999;font-size:12px;line-height:1.5;margin:14px 20px;overflow-wrap:anywhere}

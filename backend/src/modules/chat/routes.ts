@@ -1,4 +1,4 @@
-import {currentMessage,messageVersions,selectMessageVersion} from './live-operations.js';
+import {currentMessage,messageVersions,selectMessageVersion,withVersionNavigation} from './live-operations.js';
 import {batchReady,projectSegments,reviseSegment,segmentSource} from './live-batch.js';
 import {chatParticipants,conversationProfile} from './participants.js';
 import { reviseMessage } from '../sync/mutations.js';
@@ -33,20 +33,20 @@ export function chatRouter(service: ChatService, reauthorize?: (req: import('exp
   });
   router.put('/conversations/:id/members',(req,res)=>{
     const b=objectBody(req.body);if(!Array.isArray(b.expectedMembers)||!b.expectedMembers.every(x=>typeof x==='string')||!Array.isArray(b.members))throw new ValidationError('Invalid members');
-    const result=store.setGroupMembers(uuid(req.params.id,'conversationId'),b.expectedMembers as string[],b.members as string[]);permissionsChanged?.();res.json(result);
+    const result=store.setGroupMembers(uuid(req.params.id,'conversationId'),b.expectedMembers as string[],b.members as string[],b.requestId===undefined?undefined:uuid(b.requestId,'requestId'));permissionsChanged?.();res.json(result);
   });
   router.get('/conversations/:id/messages',(req,res) => {
     const id = uuid(req.params.id,'conversationId'), limit = pageNumber(req.query.limit,50,'limit',1,100);
     const before = pageNumber(req.query.before,Number.MAX_SAFE_INTEGER,'before',1,Number.MAX_SAFE_INTEGER);
     const rows = store.messages(id,before,limit+1,true); const hasMore = rows.length>limit; const items = hasMore ? rows.slice(1) : rows;
-    res.json({items:projectSegments(store.db,items),nextBefore:hasMore?items[0].messageSeq:null,unresolvedTurn:store.unresolved(id)});
+    res.json({items:withVersionNavigation(store,projectSegments(store.db,items)),systemEvents:store.systemEvents(id,hasMore?(items[0]?.messageSeq??0):0,before),nextBefore:hasMore?items[0].messageSeq:null,unresolvedTurn:store.unresolved(id)});
   });
   router.post('/conversations/:id/batches',async(req,res)=>{
     const b=objectBody(req.body),id=uuid(req.params.id,'conversationId');if(!batchReady(store.db))throw new ChatError(503,'BATCH_UPGRADE_REQUIRED');if(!Array.isArray(b.segments)||b.segments.length<1||b.segments.length>16)throw new ValidationError('Invalid segments');
     const segments=b.segments as import('@sakie/contracts').LiveChatSegment[];for(const p of segments)text(p?.content,'content',service.config.maxMessageChars);if(segments.reduce((n,p)=>n+p.content.length+(p.quote?.selectedText?.length??0)+30,0)>service.config.maxMessageChars)throw new ValidationError('Batch context too long');const content=segments.map(p=>p.content).join('\n\n');text(content,'batch content',service.config.maxMessageChars);
-    const submissionId=uuid(b.submissionId,'submissionId');let result;try{result=await service.send({conversationId:id,clientMessageId:submissionId,content,segments,...(b.replyToMemberId!==undefined?{replyToMemberId:text(b.replyToMemberId,'replyToMemberId',100)}:{})});}catch(e){if(e instanceof Error&&'status' in e&&['INVALID_SEGMENTS','INVALID_SEGMENT','SEGMENT_ID_CONFLICT','QUOTE_SCOPE_DENIED','QUOTE_NOT_CURRENT','BATCH_UPGRADE_REQUIRED'].includes(e.message))throw new ChatError(Number(e.status),e.message);throw e;}res.status(202).json({...result,submissionId,conversationId:id,bubbleIds:segments.map(p=>p.id),messages:store.turnMessages(result.turn.id)});
+    const submissionId=uuid(b.submissionId,'submissionId');let result;try{result=await service.send({conversationId:id,clientMessageId:submissionId,content,segments,...(b.replyToMemberId!==undefined?{replyToMemberId:text(b.replyToMemberId,'replyToMemberId',100)}:{})});}catch(e){if(e instanceof Error&&'status' in e&&['INVALID_SEGMENTS','INVALID_SEGMENT','SEGMENT_ID_CONFLICT','QUOTE_SCOPE_DENIED','QUOTE_NOT_CURRENT','BATCH_UPGRADE_REQUIRED'].includes(e.message))throw new ChatError(Number(e.status),e.message);throw e;}res.status(202).json({...result,submissionId,conversationId:id,bubbleIds:segments.map(p=>p.id),messages:withVersionNavigation(store,store.turnMessages(result.turn.id))});
   });
-  router.get('/conversations/:id/batch-receipts/:submissionId',(req,res)=>{const id=uuid(req.params.id,'conversationId'),submissionId=uuid(req.params.submissionId,'submissionId');if(!batchReady(store.db))throw new ChatError(503,'BATCH_UPGRADE_REQUIRED');if(!store.conversation(id))throw new ChatError(404,'CONVERSATION_NOT_FOUND');const row=store.db.prepare('SELECT turn_id FROM chat_live_submissions WHERE id=? AND conversation_id=?').get(submissionId,id);if(!row)throw new ChatError(404,'RECEIPT_NOT_FOUND');const turn=store.turn(String(row.turn_id)),messages=store.turnMessages(turn.id);res.json({...store.receipt(turn),turn,submissionId,conversationId:id,bubbleIds:store.db.prepare('SELECT p.id FROM chat_live_segments p JOIN chat_live_submissions s ON s.parent_id=p.parent_id WHERE s.id=? ORDER BY p.position').all(submissionId).map(x=>x.id),messages});});
+  router.get('/conversations/:id/batch-receipts/:submissionId',(req,res)=>{const id=uuid(req.params.id,'conversationId'),submissionId=uuid(req.params.submissionId,'submissionId');if(!batchReady(store.db))throw new ChatError(503,'BATCH_UPGRADE_REQUIRED');if(!store.conversation(id))throw new ChatError(404,'CONVERSATION_NOT_FOUND');const row=store.db.prepare('SELECT turn_id FROM chat_live_submissions WHERE id=? AND conversation_id=?').get(submissionId,id);if(!row)throw new ChatError(404,'RECEIPT_NOT_FOUND');const turn=store.turn(String(row.turn_id)),messages=store.turnMessages(turn.id);res.json({...store.receipt(turn),turn,submissionId,conversationId:id,bubbleIds:store.db.prepare('SELECT p.id FROM chat_live_segments p JOIN chat_live_submissions s ON s.parent_id=p.parent_id WHERE s.id=? ORDER BY p.position').all(submissionId).map(x=>x.id),messages:withVersionNavigation(store,messages)});});
   // Resolve a lost acknowledgement without replaying a write or starting a model call.
   router.get('/conversations/:id/receipts/:clientMessageId',(req,res) => {
     const id=uuid(req.params.id,'conversationId'), clientId=uuid(req.params.clientMessageId,'clientMessageId');
@@ -54,7 +54,7 @@ export function chatRouter(service: ChatService, reauthorize?: (req: import('exp
     const row=store.db.prepare('SELECT id FROM chat_turns WHERE conversation_id=? AND client_message_id=?').get(id,clientId);
     if(!row) throw new ChatError(404,'RECEIPT_NOT_FOUND');
     const turn=store.turn(String(row.id));
-    res.json({turn,messages:store.turnMessages(turn.id),...store.receipt(turn)});
+    res.json({turn,messages:withVersionNavigation(store,store.turnMessages(turn.id)),...store.receipt(turn)});
   });
   router.post('/conversations/:id/messages',async(req,res) => {
     const body = objectBody(req.body);
@@ -73,7 +73,7 @@ export function chatRouter(service: ChatService, reauthorize?: (req: import('exp
     const conversationId=uuid(req.params.id,'conversationId'),id=uuid(req.params.messageId,'messageId'),m=currentMessage(store,id);
     if(m.conversationId!==conversationId)throw new ChatError(404,'MESSAGE_NOT_AVAILABLE');
     const item=segmentSource(store.db,id)?projectSegments(store.db,[store.message(m.parentId)!]).find(p=>p.id===id):store.message(id);
-    res.json({item});
+    res.json({item:item?withVersionNavigation(store,[item])[0]:null});
   });
   router.get('/messages/:id/versions',(req,res)=>res.json(messageVersions(store,uuid(req.params.id,'messageId'))));
   router.post('/messages/:id/versions/select',(req,res)=>{
@@ -106,7 +106,7 @@ export function chatRouter(service: ChatService, reauthorize?: (req: import('exp
     const turn = store.turn(id);
     const messages = after && ['queued','running'].includes(turn.status) ? [] : store.turnMessages(turn.id);
     // Additive volatile progress; only committed messages above are archival sources.
-    res.json({turn,messages,updateCursor:service.cursor(id),progress:turn.status==='running'?service.progress(turn.id):null,timings:service.timing(turn.id)});
+    res.json({turn,messages:withVersionNavigation(store,messages),updateCursor:service.cursor(id),progress:turn.status==='running'?service.progress(turn.id):null,timings:service.timing(turn.id)});
   });
   router.post('/turns/:id/retry',(req,res) => {
     const body = objectBody(req.body);

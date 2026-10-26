@@ -36,8 +36,8 @@ export interface ChatParticipant { id: string; name: string; }
 export interface ChatConversationProfile { kind: 'private' | 'group'; members: string[]; }
 export interface ChatConversation { pinned?:boolean; id: string; title: string; createdAt: string; profile?: ChatConversationProfile | null; }
 export interface ChatTurn { id: string; conversationId: string; clientMessageId: string; turnSeq: number; status: ChatTurnStatus; replyToMemberId?: string | null; errorCode: string | null; createdAt: string; }
-export interface ChatMessage {parentMessageId?:string;segmentPosition?:number;quote?:(import('./chat-v11.js').V11QuoteTarget & {unavailable?:boolean}); id: string; turnId: string; messageSeq: number; role: 'user' | 'assistant'; content: string; createdAt: string; revision?: number; speakerId?: string | null; usage?: {cacheRateApplicable?:boolean;inputTokens:number|null;outputTokens:number|null;cacheReadTokens:number|null;cacheWriteTokens:number|null}; }
-export interface ChatHistoryPage { items: ChatMessage[]; nextBefore: number | null; unresolvedTurn: ChatTurn | null; }
+export interface ChatMessage {versionNavigation?:ChatVersionNavigation;parentMessageId?:string;segmentPosition?:number;quote?:(import('./chat-v11.js').V11QuoteTarget & {unavailable?:boolean}); id: string; turnId: string; messageSeq: number; role: 'user' | 'assistant'; content: string; createdAt: string; revision?: number; speakerId?: string | null; usage?: {cacheRateApplicable?:boolean;inputTokens:number|null;outputTokens:number|null;cacheReadTokens:number|null;cacheWriteTokens:number|null}; }
+export interface ChatHistoryPage {systemEvents?:ChatSystemEvent[]; items: ChatMessage[]; nextBefore: number | null; unresolvedTurn: ChatTurn | null; }
 export interface ChatConversationPage { items: (ChatConversation & {cursor:number})[]; nextBefore: number | null; }
 
 /** Raw JSON is preserved verbatim so hashes do not depend on object key reserialization. */
@@ -67,4 +67,7 @@ export interface LiveChatGeneration {
  status:'pending'|'running'|'succeeded'|'failed'|'cancelled'|'unknown';
  partial:string;errorCode:string|null;resultRevision:number|null;
 }
-export interface LiveMessageVersions {id:string;currentRevision:number;items:{revision:number;content:string}[];}
+export interface LiveMessageVersions {id:string;currentRevision:number;activeVersionRevision?:number;items:{revision:number;content:string}[];}
+
+export interface ChatVersionNavigation {index:number;total:number;previousRevision?:number;nextRevision?:number;}
+export interface ChatSystemEvent {id:string;conversationId:string;kind:'members.joined';createdAt:string;afterMessageSeq:number;memberIds:string[];memberNames:string[];text:string;}

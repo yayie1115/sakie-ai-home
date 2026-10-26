@@ -2,9 +2,10 @@ import {operationsReady} from './live-operations.js';
 import {batchReady,batchHash,validateSegments,insertSegments,segmentSnapshot,projectSegments} from './live-batch.js';
 import {conversationDeleted,uiReady} from '../app-ui/schema.js';
 import { hasLiveChat } from './live-schema.js';
-import { conversationProfile } from './participants.js';
+import { chatParticipants,conversationProfile } from './participants.js';
 import type { ChatConversationProfile } from '@sakie/contracts';
 import { appendEvent } from '../sync/events.js';
+import {previousMutation,saveMutation} from '../sync/mutations.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ClientMessage, CloudMessageStore, DurableMessageReceipt, ChatTurn, ChatMessage, ChatConversation } from '@sakie/contracts';
@@ -34,18 +35,27 @@ export class ChatStore implements CloudMessageStore {
       return this.conversation(id)!;
     });
   }
-  setGroupMembers(id:string,expectedMembers:string[],members:string[]){
+  setGroupMembers(id:string,expectedMembers:string[],members:string[],requestId?:string){
     if(!operationsReady(this.db))throw new ChatError(503,'OPS_UPGRADE_REQUIRED');
     return this.transaction(()=>{
       const current=this.conversation(id);if(!current||current.profile?.kind!=='group')throw new ChatError(404,'GROUP_NOT_FOUND');
+      const request={resource:'chat-members',conversationId:id,expectedMembers,members};
+      const key=requestId??hashContent(JSON.stringify(request));
+      if(previousMutation(this.db,key,request))return current;
       if(JSON.stringify(current.profile.members)!==JSON.stringify(expectedMembers))throw new ChatError(409,'MEMBERSHIP_CONFLICT');
       if(this.unresolved(id)||this.db.prepare("SELECT 1 FROM chat_live_generations WHERE conversation_id=? AND status IN ('pending','running')").get(id))throw new ChatError(409,'CHAT_IN_PROGRESS');
       const profile=conversationProfile({kind:'group',members});
       if(current.profile.members.some(m=>!profile.members.includes(m)))throw new ChatError(409,'MEMBER_REMOVAL_NOT_ENABLED');
       const additions=profile.members.filter(m=>!current.profile!.members.includes(m));
       additions.forEach((member,index)=>this.db.prepare('INSERT INTO chat_live_members VALUES(?,?,?)').run(id,member,current.profile!.members.length+index));
+      const systemEvent=additions.length?{id:key,conversationId:id,kind:'members.joined',createdAt:new Date().toISOString(),afterMessageSeq:Number(this.db.prepare('SELECT COALESCE(MAX(message_seq),0) seq FROM chat_messages WHERE conversation_id=?').get(id)!.seq),memberIds:additions,memberNames:additions.map(member=>chatParticipants.find(p=>p.id===member)!.name)}:null;
+      saveMutation(this.db,key,request,{resource:'chat-members',conversationId:id,systemEvent});
       return this.conversation(id)!;
     });
+  }
+  systemEvents(id:string,fromSeq=0,beforeSeq=Number.MAX_SAFE_INTEGER):import('@sakie/contracts').ChatSystemEvent[]{
+    if(!this.conversation(id))throw new ChatError(404,'CONVERSATION_NOT_FOUND');
+    return this.db.prepare("SELECT result_json FROM sync_mutations WHERE json_extract(result_json,'$.resource')='chat-members' AND json_extract(result_json,'$.conversationId')=? AND json_extract(result_json,'$.systemEvent.afterMessageSeq')>=? AND json_extract(result_json,'$.systemEvent.afterMessageSeq')<? ORDER BY rowid").all(id,fromSeq,beforeSeq).map(row=>{const event=JSON.parse(String(row.result_json)).systemEvent;return {...event,text:'你邀请了'+event.memberNames.join('、')+'加入群聊。'};});
   }
   replyMember(message:ClientMessage):string|null {
     const profile=this.profile(message.conversationId);
