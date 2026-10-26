@@ -5,7 +5,7 @@ import { useLongPress } from './useLongPress';
 
 type Props={room:Room;messages:Message[];composer:Composer;onCompose:(patch:Partial<Composer>)=>void;
  onStage:()=>void;onSubmit:()=>void;onMessages:(messages:Message[])=>void;onPending:(messages:Message[])=>void;
- active?:boolean;onBack:()=>void;onDetails:()=>void;notice:(message:string)=>void;jumpId?:string;onJumped:()=>void;locked?:boolean;linked?:boolean;onOperate?:(m:Message,action:string,value?:string)=>Promise<void>;onRead?:(m:Message)=>Promise<string>;live?:{batchEnabled?:boolean;disabled:boolean;maxLength:number;status:string;replyPicker?:React.ReactNode};m0?:{modelLabel:string;onNavigation:()=>void;initialLatest:boolean;hasEarlier:boolean;loadEarlier:()=>Promise<void>;loadingEarlier:boolean}};
+ active?:boolean;onBack:()=>void;onDetails:()=>void;notice:(message:string)=>void;jumpId?:string;onJumped:()=>void;locked?:boolean;linked?:boolean;onOperate?:(m:Message,action:string,value?:string)=>Promise<void>;onRead?:(m:Message)=>Promise<string>;live?:{batchEnabled?:boolean;disabled:boolean;maxLength:number;status:string;replyPicker?:React.ReactNode};m0?:{modelLabel:string;onNavigation:()=>void;initialLatest:boolean;loading?:boolean;hasEarlier:boolean;loadEarlier:()=>Promise<void>;loadingEarlier:boolean}};
 function Bubble({m,room,selected,onOpen,onQuoteJump,children}:{m:Message;room:Room;selected:boolean;onOpen:()=>void;onQuoteJump:(id:string)=>void;children:React.ReactNode}){
  const press=useLongPress(onOpen);
  return <article className={`v11-message ${m.author==='me'?'mine':room.kind==='group'?'group-speaker':''} ${selected?'chosen':''}`} data-message-id={m.id}>
@@ -33,7 +33,7 @@ export function Timeline(props:Props){
  useLayoutEffect(()=>{if(props.live&&pinned.current&&scroll.current)scroll.current.scrollTop=scroll.current.scrollHeight;},[messages.length,messages.at(-1)?.versions[0],props.live?.status]);
  useLayoutEffect(()=>{const el=scroll.current,anchor=earlierAnchor.current;if(!el||!anchor)return;const node=el.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchor.id)}"]`);if(node){el.scrollTop+=node.getBoundingClientRect().top-el.getBoundingClientRect().top-anchor.offset;earlierAnchor.current=null;}},[messages[0]?.id,messages.length]);
  async function earlier(){const el=scroll.current;if(!el||!props.m0||props.m0.loadingEarlier)return;const bounds=el.getBoundingClientRect(),node=[...el.querySelectorAll<HTMLElement>('[data-message-id]')].find(n=>n.getBoundingClientRect().bottom>bounds.top+1);if(node)earlierAnchor.current={id:node.dataset.messageId!,offset:node.getBoundingClientRect().top-bounds.top};pinned.current=false;if(messages.length>count){setCount(n=>n+30);return;}await props.m0.loadEarlier();setCount(n=>n+50);}
- useLayoutEffect(()=>{if(props.active&&scroll.current)scroll.current.scrollTop=pinned.current?scroll.current.scrollHeight:composer.scroll;},[props.active]);
+ useLayoutEffect(()=>{if(props.active&&scroll.current)scroll.current.scrollTop=pinned.current?scroll.current.scrollHeight:composer.scroll;},[props.active,props.m0?.loading]);
  useEffect(()=>{if(props.active===false){close();setEmoji(false);setMore(false);}},[props.active]);
  useEffect(()=>{if(!menu&&!edit)return;const outside=(e:PointerEvent)=>{if(!(e.target as HTMLElement).closest('.v11-bubblebar,.wx-message-editor'))close();};document.addEventListener('pointerdown',outside,true);return()=>document.removeEventListener('pointerdown',outside,true);},[menu,edit]);
  useEffect(()=>{if(!menu)return;const frame=requestAnimationFrame(()=>{const timeline=scroll.current;const bar=timeline?.querySelector('.v11-bubblebar');if(timeline&&bar){const excess=bar.getBoundingClientRect().bottom-timeline.getBoundingClientRect().bottom+12;if(excess>0)timeline.scrollTop+=excess;}});return()=>cancelAnimationFrame(frame);},[menu,edit]);
@@ -83,7 +83,7 @@ export function Timeline(props:Props){
        {props.live&&m.author!=='me'&&!m.delivery&&<small className="wx-usage">{usageLine(m)}</small>}
        {m.versions.length>1&&<small className="v11-meta">版本 {m.version+1}/{m.versions.length}</small>}
      </Bubble>)}
-     {!all.length&&<p className="v11-empty">{readOnly?'此测试会话暂无已保存消息':'还没有消息，发出第一句问候吧。'}</p>}
+     {props.m0?.loading&&<div className="wx-history-loading" role="status" aria-label="正在同步会话"><span/><span/><span/></div>}{!props.m0?.loading&&!all.length&&<p className="v11-empty">{readOnly?'此测试会话暂无已保存消息':'还没有消息，发出第一句问候吧。'}</p>}
    </div>
    <form className="v11-composer" onPointerDown={e=>{if(document.activeElement===input.current&&(e.target as HTMLElement).closest('button.v11-primary'))e.preventDefault();}} onMouseDown={e=>{if(document.activeElement===input.current&&(e.target as HTMLElement).closest('button.v11-primary'))e.preventDefault();}} onSubmit={e=>{e.preventDefault();if(props.live){if(props.live.batchEnabled&&composer.draft.trim()){if(!props.locked)stage();}else if(!props.live.disabled)props.onSubmit();bottom();return;}if(readOnly){props.notice('发送待M0-3授权，本轮不会调用模型');return;}if(composer.draft.trim())stage();else if(composer.pending.length){props.onSubmit();bottom();}else props.notice('语音与通话尚未接入，不会启动录音');}}>
      {props.live?.replyPicker}
