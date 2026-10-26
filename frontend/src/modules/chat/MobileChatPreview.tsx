@@ -1,3 +1,4 @@
+import {useNotice} from '../../app/useNotice';
 import {V11SubmissionClient,DefinitiveSubmissionRejection} from './v11/submission';
 import type {V11Submission,V11SubmissionReceipt,V11PendingBubble} from '@sakie/contracts';
 import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
@@ -43,7 +44,7 @@ export function MobileChatPreview({ live = false,embedded=false,uiReady=false }:
     const [messages, setMessages] = useState<ChatMessage[]>([]), [loadedFor, setLoadedFor] = useState<string | null>(null), [before, setBefore] = useState<number | null>(null), [historyError, setHistoryError] = useState(''), [historyBusy, setHistoryBusy] = useState(false);
     const [roomMenu,setRoomMenu]=useState<string|null>(null),[pinned,setPinned]=useState<Record<string,boolean>>({});
 
-    const [query, setQuery] = useState(''),[searchQuery,setSearchQuery]=useState(''), [notice, setNotice] = useState(''), [drawer, setDrawer] = useState(false), [dark, setDark] = useState(false);
+    const [query, setQuery] = useState(''),[searchQuery,setSearchQuery]=useState(''), [notice, setNotice] = useNotice(), [drawer, setDrawer] = useState(false), [dark, setDark] = useState(false);
     const [composers, setComposers] = useState<Record<string, Composer>>(readComposers), [scrolled, setScrolled] = useState<Record<string, boolean>>({});
     const composersRef=useRef(composers);composersRef.current=composers;
     useEffect(()=>{if(!live)return;const timer=setTimeout(()=>{try{sessionStorage.setItem(draftsKey,JSON.stringify(composers));}catch{setNotice('暂存无法保存在本标签页，请勿刷新；正式提交前会再次检查。');}},300);return()=>clearTimeout(timer);},[live,composers]);
@@ -291,7 +292,7 @@ export function MobileChatPreview({ live = false,embedded=false,uiReady=false }:
       <p className="v11-disclaimer">{live?'消息来自真实聊天服务。成员选择与回复归属已保存；长期记忆按授权使用；独立人格、多 AI 自主调度尚未接通。':'独立只读测试，不写入、不调用模型。'}</p>
     </ConversationDetailsFrame></Suspense>}
 
-   </div>{notice && <div role="status" className="v11-toast">{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}>×</button></div>}
+   </div>{notice && <div role="status" className="v11-toast">{notice}</div>}
   </section>{!embedded&&<nav className="m0-main-nav" aria-label="主导航"><button disabled title="Home尚未开放">Home</button><button aria-current="page" onClick={() => { setDrawer(false); navigate(route); }}>Chat</button><button disabled title="World尚未开放">World</button></nav>}</div>
  </div>;
 }

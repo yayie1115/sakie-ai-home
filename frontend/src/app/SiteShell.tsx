@@ -1,3 +1,4 @@
+import {useNotice} from './useNotice';
 import {useEffect,useRef,useState,type CSSProperties} from 'react';
 import {useLocation,useNavigate} from 'react-router';
 import {useApi,useSessionActions} from './api';
@@ -10,7 +11,7 @@ const groups=[['appearance','外观与主题'],['models','模型管理'],['auton
 const defaults:State={ready:false,settings:{revision:0,anniversary:null,accent:'#07c160'},model:{configured:false,name:null},memory:false,worldInstallation:false};
 export function SiteShell(){
  const api=useApi(),session=useSessionActions(),navigate=useNavigate(),location=useLocation(),chatUrl=useRef('/chat'),worldCache=useRef<{items:AppItem[];at:number}|null>(null);
- const [state,setState]=useState<State>(defaults),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[date,setDate]=useState(''),[accent,setAccent]=useState('#07c160');
+ const [state,setState]=useState<State>(defaults),[error,setError]=useState(''),[notice,setNotice]=useNotice(),[busy,setBusy]=useState(false),[date,setDate]=useState(''),[accent,setAccent]=useState('#07c160');
  const path=location.pathname,isChat=path==='/chat',isWorld=path.startsWith('/world'),fullScreen=path.startsWith('/world/apps/');
  if(isChat)chatUrl.current=path+location.search;
  useEffect(()=>{const c=new AbortController();api<State>('/api/ui/state',{signal:c.signal}).then(s=>{setState(s);setDate(s.settings.anniversary??'');setAccent(s.settings.accent);}).catch(()=>{if(!c.signal.aborted)setError('新界面配置暂不可用，聊天仍可使用。');});return()=>c.abort();},[api]);
@@ -37,7 +38,7 @@ export function SiteShell(){
  </div></main>}
  </div>
  {!fullScreen&&<nav className="wx-tabs" aria-label="主导航">{[['/','⌂','首页'],['/chat','▢','聊天'],['/world','◎','World']].map(([url,icon,label])=><button key={url} aria-current={(url==='/'?path==='/'||path.startsWith('/home')||path.startsWith('/settings'):url==='/chat'?isChat:isWorld)?'page':undefined} onClick={()=>navigate(url==='/chat'?chatUrl.current:url)}><span aria-hidden="true">{icon}</span>{label}</button>)}</nav>}
- {notice&&<div role="status" className="wx-toast">{notice}<button aria-label="关闭提示" onClick={()=>setNotice('')}>×</button></div>}
+ {notice&&<div role="status" className="wx-toast">{notice}</div>}
  </div>;
 }
 function Records({section}:{section:string}){const api=useApi();const [rows,setRows]=useState<Record<string,string>[]>([]),[total,setTotal]=useState(0),[moreBusy,setMoreBusy]=useState(false),[error,setError]=useState(''),[loading,setLoading]=useState(true);useEffect(()=>{setRows([]);setError('');if(!['diary','status'].includes(section)){setLoading(false);return;}const c=new AbortController();setLoading(true);api<{items:Record<string,string>[];total:number}>('/api/'+(section==='diary'?'diaries':'activities')+'?limit=20',{signal:c.signal}).then(p=>{if(!Array.isArray(p.items))throw Error('INVALID_RECORD_PAGE');setRows(p.items);setTotal(p.total);}).catch(()=>{if(!c.signal.aborted)setError('暂时无法读取真实记录，请稍后重试。');}).finally(()=>{if(!c.signal.aborted)setLoading(false);});return()=>c.abort();},[api,section]);return <section className="wx-group wx-records">{section==='status'&&<p>以下为已保存的活动记录，不据此证明 AI 已实际执行；请结合记录来源判断。</p>}{loading?<p role="status">正在读取…</p>:error?<p role="alert">{error}</p>:rows.length?rows.map(r=><article key={r.id}><small>{r.date??r.time}{r.type?' · '+r.type:''}</small><p>{r.content}</p></article>):<p>{section==='diary'?'暂无已保存日记。':section==='status'?'暂无已保存活动记录。':section==='today'?'日历与提醒尚未接通。':'情绪系统尚未启用，不生成模拟历史。'}</p>}{rows.length<total&&<button disabled={moreBusy} onClick={async()=>{setMoreBusy(true);try{const p=await api<{items:Record<string,string>[];total:number}>('/api/'+(section==='diary'?'diaries':'activities')+'?limit=20&offset='+rows.length);setRows(old=>[...old,...p.items.filter(x=>!old.some(r=>r.id===x.id))]);setTotal(p.total);}catch{setError('读取更多记录失败，请重试。');}finally{setMoreBusy(false);}}}>加载更多</button>}</section>;}

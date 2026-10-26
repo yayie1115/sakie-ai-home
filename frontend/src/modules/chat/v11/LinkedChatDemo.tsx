@@ -1,3 +1,4 @@
+import {useNotice} from '../../../app/useNotice';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { V11History, V11PendingBubble, V11SubmissionReceipt, OpsHistory, GenerationView, BubbleOperation } from '@sakie/contracts';
 import { ApiError, useApi } from '../../../app/api';
@@ -10,7 +11,7 @@ import { compose, emptyComposer, stage, type Workspace, type Message } from './s
 /** Reuses the v11 Timeline. This component cannot target an arbitrary server or database. */
 export function LinkedChatDemo({data01=false}:{data01?:boolean}){
  const base=data01?'/api/lab/chat-data01':'/api/lab/chat-v11';const storagePrefix=data01?'sakie:data01':'sakie:v11';
- const api=useApi();const [state,setState]=useState<Workspace>();const [notice,setNotice]=useState('');const [busy,setBusy]=useState(false);const [uncertain,setUncertain]=useState(false);const [turn,setTurn]=useState<string>();
+ const api=useApi();const [state,setState]=useState<Workspace>();const [notice,setNotice]=useNotice();const [busy,setBusy]=useState(false);const [uncertain,setUncertain]=useState(false);const [turn,setTurn]=useState<string>();
  const [jobs,setJobs]=useState<GenerationView[]>([]);const [opBusy,setOpBusy]=useState(false);const [opUncertain,setOpUncertain]=useState(false);
  const mounted=useRef(true);useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
  const storage=useMemo(()=>({read(){const raw=sessionStorage.getItem(storagePrefix+':linked-submission');return raw?JSON.parse(raw):null;},write(request:unknown){sessionStorage.setItem(storagePrefix+':linked-submission',JSON.stringify(request));},clear(){sessionStorage.removeItem(storagePrefix+':linked-submission');}}),[storagePrefix]);
@@ -86,5 +87,5 @@ export function LinkedChatDemo({data01=false}:{data01?:boolean}){
    {['queued','running','unknown'].includes(j.status)&&<button disabled={opBusy||opUncertain} onClick={()=>void perform('/jobs/'+j.id+'/cancel',{requestId:crypto.randomUUID()}).catch(()=>{})}>取消生成</button>}
    {['failed','unknown','cancelled'].includes(j.status)&&<button disabled={opBusy||opUncertain||!j.evidenceAvailable} onClick={()=>void perform('/jobs/'+j.id+'/retry',{requestId:crypto.randomUUID(),acknowledgeUnknown:j.status==='unknown'}).catch(()=>{})}>{!j.evidenceAvailable?'来源变更，请重新发起':j.status==='unknown'?'确认未知结果并重试':'重试生成'}</button>}
   </section>)}</div>}
- </div>{notice&&<div className="v11-toast" role="status">{notice}<button onClick={()=>setNotice('')}>×</button></div>}</section>;
+ </div>{notice&&<div className="v11-toast" role="status">{notice}</div>}</section>;
 }

@@ -1,3 +1,4 @@
+import {useNotice} from '../../../app/useNotice';
 import {ConversationCreator} from './ConversationCreator';
 import {ConversationDetailsFrame} from './ConversationDetailsFrame';
 import { useEffect, useRef, useState } from 'react';
@@ -12,7 +13,7 @@ export function ChatWorkspace(){
  const workspace=useRef<HTMLElement>(null);
  const [state,setState]=useState(load);const [selected,setSelected]=useState<string|null>(null);const [listOpen,setListOpen]=useState(true);
  const [search,setSearch]=useState('');const [panel,setPanel]=useState('');const [menu,setMenu]=useState<string|null>(null);
- const [picked,setPicked]=useState<string[]>([]);const [notice,setNotice]=useState('');const [dark,setDark]=useState(false);
+ const [picked,setPicked]=useState<string[]>([]);const [notice,setNotice]=useNotice();const [dark,setDark]=useState(false);
  const [historyQuery,setHistoryQuery]=useState('');const [historyDate,setHistoryDate]=useState('');const [searchCount,setSearchCount]=useState(20);const [jump,setJump]=useState<string>();
  const [nameEditor,setNameEditor]=useState<{roomId:string;member?:string;value:string}|null>(null);
  const [deleteId,setDeleteId]=useState<string|null>(null);const [trashCategory,setTrashCategory]=useState('会话');
@@ -52,6 +53,6 @@ export function ChatWorkspace(){
    {menu&&<div className="v11-overlay" onClick={()=>setMenu(null)}><div className="v11-modal" role="dialog" aria-modal="true" aria-label="会话操作" onClick={e=>e.stopPropagation()}><h3>{state.rooms.find(r=>r.id===menu)?.name}</h3><div className="v11-modal-actions"><button onClick={()=>{const r=state.rooms.find(r=>r.id===menu)!;setState(s=>changeRoom(s,r.id,{pinned:!r.pinned}));setMenu(null);}}>{state.rooms.find(r=>r.id===menu)?.pinned?'取消置顶':'置顶'}</button><button className="v11-danger" onClick={()=>{setDeleteId(menu);setMenu(null);}}>删除会话</button><button onClick={()=>setMenu(null)}>取消</button></div></div></div>}
    {deleteId&&<div className="v11-overlay"><div className="v11-modal" role="dialog" aria-modal="true" aria-label="确认删除会话"><h3>删除整个会话？</h3><p>演示会话将进入 30 天回收站，可恢复。这不会操作真实消息或记忆。</p><div className="v11-modal-actions"><button onClick={()=>setDeleteId(null)}>取消</button><button className="v11-danger" onClick={()=>{setState(s=>changeRoom(s,deleteId,{deletedAt:Date.now()}));if(selected===deleteId)setSelected(null);setDeleteId(null);setListOpen(true);}}>确认删除</button></div></div></div>}
    {nameEditor&&<div className="v11-overlay"><form className="v11-modal" role="dialog" aria-modal="true" aria-label="修改备注" onSubmit={e=>{e.preventDefault();const value=nameEditor.value.trim();if(!value)return;setState(s=>{const r=s.rooms.find(r=>r.id===nameEditor.roomId)!;return changeRoom(s,r.id,nameEditor.member?{remarks:{...r.remarks,[nameEditor.member]:value}}:{name:value});});setNameEditor(null);}}><h3>{nameEditor.member?'修改群内备注':'修改名称'}</h3><input autoFocus aria-label="新名称" value={nameEditor.value} maxLength={60} onChange={e=>setNameEditor({...nameEditor,value:e.target.value})}/><div className="v11-modal-actions"><button type="button" onClick={()=>setNameEditor(null)}>取消</button><button type="submit" disabled={!nameEditor.value.trim()}>保存</button></div></form></div>}
-   {notice&&<div className="v11-toast" role="status">{notice}<button onClick={()=>setNotice('')} aria-label="关闭提示">×</button></div>}
+   {notice&&<div className="v11-toast" role="status">{notice}</div>}
  </section>;
 }
