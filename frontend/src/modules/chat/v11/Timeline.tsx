@@ -63,7 +63,7 @@ export function Timeline(props:Props){
    }
    if(name==='up'||name==='down'){const list=[...composer.pending];const i=list.findIndex(x=>x.id===m.id),j=i+(name==='up'?-1:1);if(j>=0&&j<list.length){[list[i],list[j]]=[list[j],list[i]];props.onPending(list);}}
  }
- const bottom=()=>requestAnimationFrame(()=>{pinned.current=true;if(scroll.current)scroll.current.scrollTop=scroll.current.scrollHeight;});
+ const bottom=()=>{if(!pinned.current)return;requestAnimationFrame(()=>{if(pinned.current&&scroll.current&&props.active!==false)scroll.current.scrollTop=scroll.current.scrollHeight;});};
  function stage(){props.onStage();bottom();}
  return <>
    <header className="v11-chat-head">{props.m0&&<div className="m0-header-actions"><button className="v11-icon" onClick={props.m0.onNavigation} aria-label="打开主导航">☰</button><button className="v11-back" onClick={props.onBack} aria-label="返回会话列表">‹</button></div>}{!props.m0&&<button className="v11-back" onClick={props.onBack} aria-label="返回会话列表">〈 返回</button>}<div className="v11-chat-title"><strong>{room.name}</strong>{room.kind==='private'&&<small>{props.m0?.modelLabel??'模型信息未加载'}</small>}</div><button className="v11-icon" onClick={props.onDetails} aria-label="聊天详情">···</button></header>
