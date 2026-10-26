@@ -1,3 +1,4 @@
+import {operationsReady} from './live-operations.js';
 import {batchReady,batchHash,validateSegments,insertSegments,segmentSnapshot,projectSegments} from './live-batch.js';
 import {conversationDeleted,uiReady} from '../app-ui/schema.js';
 import { hasLiveChat } from './live-schema.js';
@@ -33,6 +34,19 @@ export class ChatStore implements CloudMessageStore {
       return this.conversation(id)!;
     });
   }
+  setGroupMembers(id:string,expectedMembers:string[],members:string[]){
+    if(!operationsReady(this.db))throw new ChatError(503,'OPS_UPGRADE_REQUIRED');
+    return this.transaction(()=>{
+      const current=this.conversation(id);if(!current||current.profile?.kind!=='group')throw new ChatError(404,'GROUP_NOT_FOUND');
+      if(JSON.stringify(current.profile.members)!==JSON.stringify(expectedMembers))throw new ChatError(409,'MEMBERSHIP_CONFLICT');
+      if(this.unresolved(id)||this.db.prepare("SELECT 1 FROM chat_live_generations WHERE conversation_id=? AND status IN ('pending','running')").get(id))throw new ChatError(409,'CHAT_IN_PROGRESS');
+      const profile=conversationProfile({kind:'group',members});
+      if(current.profile.members.some(m=>!profile.members.includes(m)))throw new ChatError(409,'MEMBER_REMOVAL_NOT_ENABLED');
+      const additions=profile.members.filter(m=>!current.profile!.members.includes(m));
+      additions.forEach((member,index)=>this.db.prepare('INSERT INTO chat_live_members VALUES(?,?,?)').run(id,member,current.profile!.members.length+index));
+      return this.conversation(id)!;
+    });
+  }
   replyMember(message:ClientMessage):string|null {
     const profile=this.profile(message.conversationId);
     if(!profile){if(message.replyToMemberId)throw new ChatError(409,'CONVERSATION_PROFILE_REQUIRED');return null;}
@@ -43,7 +57,7 @@ export class ChatStore implements CloudMessageStore {
   private speaker(turnId:string):string|null{return this.liveReady?String(this.db.prepare('SELECT member_id FROM chat_live_turn_speakers WHERE turn_id=?').get(turnId)?.member_id??'')||null:null;}
   private get speakerJoin(){return this.liveReady?' LEFT JOIN chat_live_turn_speakers sp ON sp.turn_id=m.turn_id ':'';}
   private get speakerColumn(){return this.liveReady?",CASE WHEN m.role='assistant' THEN sp.member_id ELSE NULL END AS speakerId":'';}
-  private withUsage(rows:ChatMessage[]):ChatMessage[]{if(!rows.length)return rows;const ids=[...new Set(rows.map(m=>m.turnId))];const calls=this.db.prepare("SELECT turn_id,provider,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens FROM chat_attempts WHERE status='succeeded' AND turn_id IN ("+ids.map(()=>'?').join(',')+") ORDER BY rowid").all(...ids);const byTurn=new Map(calls.map(a=>[String(a.turn_id),{cacheRateApplicable:a.provider==='deepseek',inputTokens:a.input_tokens as number|null,outputTokens:a.output_tokens as number|null,cacheReadTokens:a.cache_read_tokens as number|null,cacheWriteTokens:a.cache_write_tokens as number|null}]));return rows.map(m=>m.role==='assistant'?{...m,usage:(m.revision??1)===1?byTurn.get(m.turnId):undefined}:m);}
+  private withUsage(rows:ChatMessage[]):ChatMessage[]{if(!rows.length)return rows;const ids=[...new Set(rows.map(m=>m.turnId))];const calls=this.db.prepare("SELECT turn_id,provider,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens FROM chat_attempts WHERE status='succeeded' AND turn_id IN ("+ids.map(()=>'?').join(',')+") ORDER BY rowid").all(...ids);const byTurn=new Map(calls.map(a=>[String(a.turn_id),{cacheRateApplicable:a.provider==='deepseek',inputTokens:a.input_tokens as number|null,outputTokens:a.output_tokens as number|null,cacheReadTokens:a.cache_read_tokens as number|null,cacheWriteTokens:a.cache_write_tokens as number|null}]));const generated=operationsReady(this.db)?this.db.prepare("SELECT message_id,result_revision,provider,usage_json FROM chat_live_generations WHERE status='succeeded' AND message_id IN ("+rows.map(()=>'?').join(',')+")").all(...rows.map(m=>m.id)):[];return rows.map(m=>{if(m.role!=='assistant')return m;const g=generated.find(g=>g.message_id===m.id&&g.result_revision===(m.revision??1));return {...m,usage:g?.usage_json?{...JSON.parse(String(g.usage_json)),cacheRateApplicable:g.provider==='deepseek'}:(m.revision??1)===1?byTurn.get(m.turnId):undefined};});}
   turnMessages(turnId:string):ChatMessage[]{
     return projectSegments(this.db,this.withUsage(this.db.prepare('SELECT m.id,m.turn_id AS turnId,m.message_seq AS messageSeq,m.role,COALESCE(s.content,m.content) AS content,m.created_at AS createdAt,COALESCE(s.revision,1) AS revision'+this.speakerColumn+' FROM chat_messages m LEFT JOIN chat_message_state s ON s.message_id=m.id'+this.speakerJoin+' WHERE m.turn_id=? AND s.deleted_at IS NULL ORDER BY m.message_seq').all(turnId) as unknown as ChatMessage[]));
   }

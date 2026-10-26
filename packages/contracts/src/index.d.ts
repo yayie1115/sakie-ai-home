@@ -60,3 +60,11 @@ export interface ChatRevisionPayload { id: string; conversationId: string; revis
 export type { V11QuoteTarget, V11PendingBubble, V11Submission, V11SubmissionReceipt, V11HistoryBubble, V11History } from './chat-v11.js';
 
 export type * from './chat-data01.js';
+
+/** Official v4 named Chat operations extension; not the DATA-01/OPS-02 lab protocol. */
+export interface LiveChatGeneration {
+ id:string;conversationId:string;turnId:string;messageId:string;scope:'bubble'|'turn';
+ status:'pending'|'running'|'succeeded'|'failed'|'cancelled'|'unknown';
+ partial:string;errorCode:string|null;resultRevision:number|null;
+}
+export interface LiveMessageVersions {id:string;currentRevision:number;items:{revision:number;content:string}[];}

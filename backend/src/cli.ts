@@ -1,3 +1,4 @@
+import {upgradeOperations} from './modules/chat/live-operations.js';
 import {upgradeBatch} from './modules/chat/live-batch.js';
 import {upgradeUi} from './modules/app-ui/schema.js';
 import {upgradeMemory} from './modules/memory-next/live/schema.js';
@@ -18,6 +19,7 @@ async function main(){
   else if(command==='verify'){const value=await verifyBackup(required('backup'));console.log(JSON.stringify({verified:true,schemaVersion:value.schemaVersion,files:value.files.length}));}
   else if(command==='restore'){console.log(await restoreBackup(required('backup'),required('target')));console.log('Restored to a new directory. Revoke sessions and reconcile archive generation before activation.');}
   else if(command==='chat-upgrade'){console.log(JSON.stringify(await upgradeLiveChat(resolve(option('database',config.databasePath)!),resolve(option('backup-dir',config.backupDir)!))));}
+  else if(command==='chat-ops-upgrade'){console.log(JSON.stringify(await upgradeOperations(resolve(option('database',config.databasePath)!),resolve(option('backup-dir',config.backupDir)!))));}
   else if(command==='batch-upgrade'){console.log(JSON.stringify(await upgradeBatch(resolve(option('database',config.databasePath)!),resolve(option('backup-dir',config.backupDir)!))));}
   else if(command==='ui-upgrade'){console.log(JSON.stringify(await upgradeUi(resolve(option('database',config.databasePath)!),resolve(option('backup-dir',config.backupDir)!))));}
   else if(command==='memory-upgrade'){console.log(JSON.stringify(await upgradeMemory(resolve(option('database',config.databasePath)!),resolve(option('backup-dir',config.backupDir)!))));}
@@ -30,6 +32,6 @@ async function main(){
     if(args.includes('--rotate')){const temp=config.credentialPath+'.'+credential.id+'.new';writeFileSync(temp,JSON.stringify(credential,null,2),{flag:'wx',mode:0o600});renameSync(temp,config.credentialPath);}
     else writeFileSync(config.credentialPath,JSON.stringify(credential,null,2),{flag:'wx',mode:0o600});
     console.log('Owner configured. Copy this generated password into your password manager; it is not stored in plaintext:');console.log(password);
-  }else throw new Error('Commands: prepare, backup, verify, restore, migrate, chat-upgrade, memory-upgrade, ui-upgrade, batch-upgrade, auth-setup');
+  }else throw new Error('Commands: prepare, backup, verify, restore, migrate, chat-upgrade, memory-upgrade, ui-upgrade, batch-upgrade, chat-ops-upgrade, auth-setup');
 }
 main().catch(error=>{console.error(error instanceof Error?error.message:'Command failed');process.exitCode=1;});

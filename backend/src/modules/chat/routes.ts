@@ -1,3 +1,4 @@
+import {currentMessage,messageVersions,selectMessageVersion} from './live-operations.js';
 import {batchReady,projectSegments,reviseSegment,segmentSource} from './live-batch.js';
 import {chatParticipants,conversationProfile} from './participants.js';
 import { reviseMessage } from '../sync/mutations.js';
@@ -9,9 +10,9 @@ function uuid(value: unknown, field: string): string {
   if(typeof value !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value)) throw new ValidationError('Invalid ' + field);
   return value.toLowerCase();
 }
-export function chatRouter(service: ChatService, reauthorize?: (req: import('express').Request) => unknown, messageChanged?:(id:string)=>void) {
+export function chatRouter(service: ChatService, reauthorize?: (req: import('express').Request) => unknown, messageChanged?:(id:string)=>void,permissionsChanged?:()=>void) {
   const router = Router(), store = service.store;
-  router.get('/config',(_req,res) => res.json({configured:service.configured,model:service.configured?service.config.model:null,maxMessageChars:service.config.maxMessageChars,memoryStatus:'unavailable',participants:chatParticipants,conversationProfilesEnabled:store.liveReady,batchEnabled:batchReady(store.db),groupScheduling:'manual-single-reply',personaConfigured:false}));
+  router.get('/config',(_req,res) => res.json({configured:service.configured,model:service.configured?service.config.model:null,maxMessageChars:service.config.maxMessageChars,memoryStatus:'unavailable',participants:chatParticipants,conversationProfilesEnabled:store.liveReady,batchEnabled:batchReady(store.db),operationsEnabled:service.operations.ready,versionsEnabled:true,groupScheduling:'manual-single-reply',personaConfigured:false}));
   router.get('/conversations',(req,res) => {
     const limit = pageNumber(req.query.limit,20,'limit',1,100), before = pageNumber(req.query.before,Number.MAX_SAFE_INTEGER,'before',1,Number.MAX_SAFE_INTEGER);
     const rows = store.conversations(before,limit+1,req.query.q===undefined||req.query.q===''?'':text(req.query.q,'q',100)); const items = rows.slice(0,limit);
@@ -29,6 +30,10 @@ export function chatRouter(service: ChatService, reauthorize?: (req: import('exp
   router.put('/conversations/:id/profile',(req,res)=>{
     const body=objectBody(req.body);
     res.json(store.setProfile(uuid(req.params.id,'conversationId'),text(body.title,'title',100),conversationProfile(body)));
+  });
+  router.put('/conversations/:id/members',(req,res)=>{
+    const b=objectBody(req.body);if(!Array.isArray(b.expectedMembers)||!b.expectedMembers.every(x=>typeof x==='string')||!Array.isArray(b.members))throw new ValidationError('Invalid members');
+    const result=store.setGroupMembers(uuid(req.params.id,'conversationId'),b.expectedMembers as string[],b.members as string[]);permissionsChanged?.();res.json(result);
   });
   router.get('/conversations/:id/messages',(req,res) => {
     const id = uuid(req.params.id,'conversationId'), limit = pageNumber(req.query.limit,50,'limit',1,100);
@@ -64,6 +69,27 @@ export function chatRouter(service: ChatService, reauthorize?: (req: import('exp
     if(method==='patch')text(body.content,'content',100000);
     const id=uuid(req.params.id,'messageId');const result=reviseSegment(store.db,id,Number(body.baseRevision),uuid(body.requestId,'requestId'),method==='delete'?null:body.content as string)??reviseMessage(store.db,id,Number(body.baseRevision),uuid(body.requestId,'requestId'),method==='delete'?null:body.content as string);messageChanged?.(id);res.json(result);
   });
+  router.get('/conversations/:id/messages/:messageId',(req,res)=>{
+    const conversationId=uuid(req.params.id,'conversationId'),id=uuid(req.params.messageId,'messageId'),m=currentMessage(store,id);
+    if(m.conversationId!==conversationId)throw new ChatError(404,'MESSAGE_NOT_AVAILABLE');
+    const item=segmentSource(store.db,id)?projectSegments(store.db,[store.message(m.parentId)!]).find(p=>p.id===id):store.message(id);
+    res.json({item});
+  });
+  router.get('/messages/:id/versions',(req,res)=>res.json(messageVersions(store,uuid(req.params.id,'messageId'))));
+  router.post('/messages/:id/versions/select',(req,res)=>{
+    const b=objectBody(req.body);for(const k of ['baseRevision','revision'])if(!Number.isSafeInteger(b[k])||Number(b[k])<1)throw new ValidationError('Invalid '+k);
+    const id=uuid(req.params.id,'messageId'),result=selectMessageVersion(store,id,Number(b.baseRevision),Number(b.revision),uuid(b.requestId,'requestId'));messageChanged?.(id);res.json(result);
+  });
+  router.post('/messages/:id/regenerations',(req,res)=>{
+    const b=objectBody(req.body);if(!Number.isSafeInteger(b.baseRevision)||Number(b.baseRevision)<1||!['bubble','turn'].includes(String(b.scope)))throw new ValidationError('Invalid generation');
+    res.status(202).json(service.regenerate(uuid(b.requestId,'requestId'),uuid(req.params.id,'messageId'),b.scope as 'bubble'|'turn',Number(b.baseRevision)));
+  });
+  router.get('/conversations/:id/generations',(req,res)=>{
+    const id=uuid(req.params.id,'conversationId');if(!store.conversation(id))throw new ChatError(404,'CONVERSATION_NOT_FOUND');if(!service.operations.ready){res.json({items:[]});return;}
+    res.json({items:store.db.prepare('SELECT id FROM chat_live_generations WHERE conversation_id=? ORDER BY rowid DESC LIMIT 10').all(id).map(r=>service.operations.view(String(r.id)))});
+  });
+  router.get('/generations/:id',(req,res)=>{if(!service.operations.ready)throw new ChatError(503,'OPS_UPGRADE_REQUIRED');res.json(service.operations.view(uuid(req.params.id,'generationId')));});
+  router.post('/generations/:id/cancel',(req,res)=>{if(!service.operations.ready)throw new ChatError(503,'OPS_UPGRADE_REQUIRED');res.json(service.cancelGeneration(uuid(req.params.id,'generationId')));});
   router.get('/turns/:id',async(req,res) => {
     const id = uuid(req.params.id,'turnId');
     store.turn(id); // Validate before installing a listener.

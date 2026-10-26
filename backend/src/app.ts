@@ -35,7 +35,7 @@ export function createApp(db:DatabaseSync,options:{auth?:AuthService;chat?:ChatS
   app.use('/api/ui',uiRouter(db,memory,{configured:!!provider,name:provider?config.chat.model:null},config.publicOrigin));
   app.locals.chat=chat;
   app.use('/api/devices',deviceRouter(sync));
-  app.use('/api/chat',chatRouter(chat,req=>auth.require(req),id=>memory.messageChanged(id)));
+  app.use('/api/chat',chatRouter(chat,req=>auth.require(req),id=>memory.messageChanged(id),()=>memory.invalidate()));
   app.use('/api/memories',memoryRouter(db));app.use('/api/diaries',diaryRouter(db));app.use('/api/dreams',dreamRouter(db));app.use('/api/activities',activityRouter(db));
   app.use((_req,res)=>res.status(404).json({error:'NOT_FOUND'}));
   const errorHandler:ErrorRequestHandler=(error,_req,res,_next)=>{
