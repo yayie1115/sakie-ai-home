@@ -10,6 +10,7 @@ from serein.deployment import save_settings
 from serein.core.store import Store,encode
 from serein.core.reader import Reader
 from serein_source_projection import Projector,SourceConflict
+import source_protocol
 
 
 def main():
@@ -18,9 +19,16 @@ def main():
         settings=Settings(Path(work)/'synthetic.db',index=Path(work)/'index.db',writable=True)
         initialize(settings);save_settings(settings.database,{'pipeline':{'auto_enabled':False}})
         projector=Projector(settings)
+        envelopes={}
         def event(key,kind='upsert',message_id=1,session_id=1,text='fictional original'):
-            return {'event_id':key,'kind':kind,'instance_id':'synthetic','message_id':message_id,'session_id':session_id,
-                'message':{'role':'user','text':text,'created_at':'2026-01-01T00:00:00Z','hidden':0,'partial':0}}
+            if key not in envelopes:
+                head=projector.head('synthetic')
+                envelopes[key]=source_protocol.envelope(
+                    {'event_id':key,'kind':kind,'instance_id':'synthetic',
+                     'message_id':None if kind=='withdraw_session' else message_id,'session_id':session_id,
+                     'message':{'role':'user','text':text,'created_at':'2026-01-01T00:00:00Z','hidden':0,'partial':0}},
+                    head['sequence']+1,head['sequence'],head['hash'])
+            return envelopes[key]
         first=event('first');projector.apply(first);projector.apply(first)
         with Store(settings.database) as store:
             assert store.conn.execute('select count(*) from raw_events').fetchone()[0]==1
@@ -57,6 +65,29 @@ def main():
         save_settings(settings.database,{'pipeline':{'auto_enabled':True}})
         try:projector.apply(event('unsafe'));raise AssertionError()
         except SourceConflict:passed.append('active_pipeline_blocks_candidate_projection')
+        save_settings(settings.database,{'pipeline':{'auto_enabled':False}})
+        before=projector.head('synthetic')
+        malformed=event('bad-original');malformed['message']['created_at']='not-a-date'
+        try:projector.apply(malformed);raise AssertionError('invalid original accepted')
+        except (SourceConflict,ValueError):pass
+        assert projector.head('synthetic')==before
+        with Store(settings.database) as store:
+            assert not store.conn.execute("select 1 from morrow_source_stream_receipts where event_id='bad-original'").fetchone()
+        passed.append('failed_original_cannot_advance_cursor')
+        corrupt=event('bad-order');corrupt['previous_hash']='a'*64
+        try:projector.apply(corrupt);raise AssertionError('bad chain accepted')
+        except SourceConflict:pass
+        assert projector.head('synthetic')==before
+        passed.append('out_of_order_projection_zero_writes')
+        local_time=event('local-time',message_id=5)
+        local_time['message']['created_at']='2026-01-01 08:30:00'
+        projector.apply(local_time)
+        with Store(settings.database) as store:
+            row=store.conn.execute('SELECT created_at,metadata_json FROM raw_events').fetchone()
+            from datetime import datetime,timezone
+            assert datetime.fromisoformat(row['created_at']).astimezone(timezone.utc).hour==0
+            assert '2026-01-01 08:30:00' in row['metadata_json']
+        passed.append('morrow_wall_clock_explicit_utc8_original_retained')
     import json
     print(json.dumps({'passed':len(passed),'checks':passed,
         'not_verified':['frozen_inflight_pipeline_epoch_barrier','unbound_scene_provenance','fact_event_shadow_reprojection'],

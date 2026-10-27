@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from functools import wraps
+from contextlib import closing
 from unittest.mock import Mock, patch
 
 from flask import Flask, g, request
@@ -15,7 +16,7 @@ class MemoryModelsTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name)/'state.db'
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.executescript('CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT); CREATE TABLE providers(id INTEGER PRIMARY KEY,name TEXT,api_url TEXT,api_key TEXT,format TEXT,models TEXT,sort_order INTEGER);')
             db.execute('INSERT INTO providers VALUES (1,?,?,?,?,?,0)',
                 ('synthetic','https://models.example.test/v1','private-synthetic-value','openai',json.dumps([{'id':'embed'},{'id':'rank'}])))
@@ -83,7 +84,7 @@ class MemoryModelsTest(unittest.TestCase):
             result=self.client.post('/internal/memory-models/embeddings',json=payload,headers={'Authorization':'Bearer synthetic-broker'})
             self.assertEqual(result.status_code,200)
             self.assertNotIn('api_key',result.get_data(as_text=True))
-        with sqlite3.connect(self.path) as db:db.execute("UPDATE providers SET api_key='new-synthetic-value'")
+        with closing(sqlite3.connect(self.path)) as db, db:db.execute("UPDATE providers SET api_key='new-synthetic-value'")
         state=self.client.get('/api/memory/models',headers=self.headers).json
         self.assertEqual(state['validation']['embedding']['status'],'pending')
         self.assertEqual(self.client.post('/internal/memory-models/embeddings',json=payload,headers={'Authorization':'Bearer synthetic-broker'}).status_code,409)
@@ -99,7 +100,7 @@ class MemoryModelsTest(unittest.TestCase):
 
     def test_budget_rejects_before_provider_request(self):
         self.save()
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.row_factory=sqlite3.Row
             with patch.object(models,'DAILY_CALLS',0),patch.object(models.requests,'Session') as factory:
                 with self.assertRaises(models.ModelError):models.provider_request(db,'embedding',{'model':'embed','input':['synthetic']})
@@ -116,7 +117,7 @@ class MemoryModelsTest(unittest.TestCase):
 
     def test_existing_provider_api_redacts_key(self):
         import app
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.row_factory=sqlite3.Row
             row=dict(db.execute('select * from providers').fetchone());row.update(cache=0,cache_mode='none')
             output=app._provider_dict(row)
@@ -125,7 +126,7 @@ class MemoryModelsTest(unittest.TestCase):
     def test_broker_generation_changes_when_underlying_provider_changes(self):
         self.save();headers={'Authorization':'Bearer synthetic-broker'}
         first=self.client.get('/internal/memory-models/config',headers=headers).json
-        with sqlite3.connect(self.path) as db:db.execute("UPDATE providers SET api_url='https://other.example.test/v1'")
+        with closing(sqlite3.connect(self.path)) as db, db:db.execute("UPDATE providers SET api_url='https://other.example.test/v1'")
         second=self.client.get('/internal/memory-models/config',headers=headers).json
         self.assertNotEqual(first['embedding']['generation'],second['embedding']['generation'])
         self.assertNotIn('private-synthetic-value',json.dumps(second))
@@ -202,16 +203,22 @@ class TransactionalOutboxTest(unittest.TestCase):
 
     def test_restart_lost_ack_retry_and_quarantine_not_automatically_cleared(self):
         self.enable_fixture();self.add();self.db.commit()
-        remote=set();calls=[]
+        import source_protocol as protocol
+        remote={};calls=[]
+        instance=self.db.execute('select instance_id from memory_bridge_control').fetchone()[0]
+        def inspect(identifier):
+            self.assertEqual(identifier,instance)
+            return {'protocol':protocol.PROTOCOL,'instance_id':instance,
+                    'sequence':1 if remote else 0,'hash':next(iter(remote.values())) if remote else protocol.GENESIS}
         def send(event):
             calls.append(event['event_id'])
             if event['event_id'] not in remote:
-                remote.add(event['event_id']);raise TimeoutError()
-            return {'event_id':event['event_id'],'state':'applied'}
+                remote[event['event_id']]=protocol.fingerprint(event);raise TimeoutError()
+            return protocol.acknowledgement(event)
         with patch('serein_bridge.SOURCE_RETRACTION_VERIFIED',True):
-            self.assertEqual(memory_outbox.drain(self.path,send)['status'],'retry_pending')
-            self.assertEqual(memory_outbox.drain(self.path,send)['acknowledged'],1)
-        self.assertEqual(len(calls),2);self.assertEqual(len(remote),1)
+            self.assertEqual(memory_outbox.drain(self.path,send,inspect=inspect)['status'],'retry_pending')
+            self.assertEqual(memory_outbox.drain(self.path,send,inspect=inspect)['acknowledged'],1)
+        self.assertEqual(len(calls),1);self.assertEqual(len(remote),1)
 
     def test_production_hard_gate_never_calls_sender(self):
         self.enable_fixture();self.add();self.db.commit();send=Mock()

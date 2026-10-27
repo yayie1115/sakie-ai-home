@@ -406,8 +406,22 @@ def _repair_orphaned_messages(tables):
     return len(orphan_ids)
 
 
+def _check_memory_source_restore(db):
+    """A legacy ZIP is not an external-source ledger recovery protocol."""
+    present = {row[0] for row in db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('memory_bridge_control','memory_bridge_outbox')")}
+    if not present:
+        return
+    if len(present) != 2:
+        raise BackupError("记忆同步状态不完整，已停止恢复；请先核对完整数据库快照及外部归档水位。")
+    state = db.execute('SELECT enabled,recall_blocked FROM memory_bridge_control WHERE id=1').fetchone()
+    if not state or state[0] or state[1] or db.execute('SELECT 1 FROM memory_bridge_outbox LIMIT 1').fetchone():
+        raise BackupError("此数据库包含记忆同步状态，不能用普通 ZIP 覆盖恢复；请在停写后核对完整快照与外部归档水位。")
+
+
 def restore_backup(db, upload_dir, source, safety_backup_dir):
     """Validate and restore an archive, rolling files back if the DB import fails."""
+    _check_memory_source_restore(db)
     try:
         archive = zipfile.ZipFile(source, "r")
     except (zipfile.BadZipFile, OSError) as exc:
@@ -441,6 +455,9 @@ def restore_backup(db, upload_dir, source, safety_backup_dir):
     new_uploads_moved = False
     try:
         db.execute("BEGIN IMMEDIATE")
+        # Recheck under the write lock; capture may have changed while the ZIP
+        # was being validated. No upload swap or data deletion precedes this.
+        _check_memory_source_restore(db)
         if upload_root.exists():
             upload_root.replace(old_uploads)
             old_uploads_moved = True

@@ -18,7 +18,7 @@
 
 只保存 provider_id/model_id。服务端每次解析当前提供方连接，校验实际返回结构、模型标识、向量维度/有限数/非零向量及重排序索引/分数；模型名不能替代验证。选项或被引用提供方变更会关闭Hook；更换底层API地址会切分索引命名空间，禁止沿用不匹配的向量。
 
-回环 `/internal/memory-models/config`、`/embeddings`、`/rerank` 使用私有实例Bearer，既不接受浏览器模型Key，也不返回提供方Key。Serein只存代理引用和私有服务Token，真实提供方密钥不复制到Serein。模型引用同步timer只同步元数据、不自动调用模型；索引准备必须显式进行。
+回环 `/internal/memory-models/config`、`/embeddings`、`/rerank` 使用私有实例Bearer，既不接受浏览器模型Key，也不返回提供方Key。本轮向量与重排序连接在Serein只存代理引用和私有服务Token，不重复保存这两个模型的提供方密钥；上一轮既有Event聊天连接未在本轮重配，不能据此声称其旧配置也已迁移到代理。模型引用同步timer只同步元数据、不自动调用模型；索引准备必须显式进行。
 
 顺带修复现有提供方编辑API明文回传Key：现在只返回空输入和api_key_configured；留空保存保持原Key。获取已存提供方模型列表时，仅在URL/协议仍相同时复用已存Key，防止把旧Key转发给新地址。没有修改已有Key值。
 
@@ -44,8 +44,8 @@
 |项目|结果|
 |---|---|
 |Python compileall|通过|
-|新增模型/安全/事务outbox单测|16/16通过|
-|完整后端unittest回归|410/410通过，64.358秒，独立合成数据库/认证|
+|新增模型/安全/事务outbox单测|18/18通过|
+|完整后端unittest回归|412/412通过，64.563秒，独立合成数据库/认证；后续传输候选回归见交接报告|
 |固定Serein来源候选检查|10项通过，只使用新建合成库，生产receiver未注册|
 |真实Embedding/Reranker/Serein索引/Hook合成链路|通过；86请求/1363字符；真实聊天模型调用0|
 |前端内联脚本node --check|通过；不等于iPhone实机验收|
@@ -63,7 +63,13 @@
 
 异常回退优先程序与Hook开关，不以旧库覆盖新消息；新增控制表和空outbox可以保留，捕获保持0。模型选择可改回旧引用，但仍须验证/准备正确索引，不能静默重用错误模型向量。新broker不可用时记忆失败降级，不重发聊天模型请求。
 
-生产启用状态、实际应用提交、资源和最终接口核验由下面的完成记录补充。代码通过不是用户手机验收。
+完成记录：模型接线及无变化保存修复已部署到 `66cb81e`；随后单行模型选择显示修复已部署到 `c45d1f4e4647828ade23665bb38eb5c704f1c44e`。最后这次只更新静态HTML，未重启服务，Gunicorn主进程保持不变；HTTPS200且实际页面包含修复。
+
+实际开关核对：`enabled=true`、`hook_enabled=true`、`hook_ready=true`、`raw_sync_enabled=false`、`replace_legacy=false`。受限MCP已连接；原话工作timer禁用，自动Event未启用。两个记忆模型已有真实接口验证，当前不需要用户再补充Embedding/Reranker API。
+
+上轮实测Serein约143MiB、峰值约152MiB，主机2vCPU/4GB；这是观测值，不是长期容量保证。本次继续时Serein MemoryCurrent=150110208字节。SakieTouch、Phosphene服务仍active，Phos和Flychess HTTPS均200。没有更改其配置、DNS或证书。
+
+已核验旧会话、消息、人格、提供方、旧记忆与部署前副本内容一致，生产环境文件未改变；该项是模型接线部署时的证据，本次静态修复没有重新读取私人正文。未执行iPhone实机验收。源码已提交不等于完整原话/撤回闭环已经启用。
 
 ## 用户操作与下一步
 
