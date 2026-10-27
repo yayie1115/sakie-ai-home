@@ -1,0 +1,15 @@
+[Unit]
+Description=Synchronize memory model references (no automatic inference)
+After=morrow.service serein.service
+
+[Service]
+Type=oneshot
+User=serein
+Group=serein
+WorkingDirectory=/opt/morrow
+ExecStart=/opt/serein/venv/bin/python /opt/morrow/serein_model_sync.py --config /etc/serein/config.toml --token-file /etc/serein/api-token
+UMask=0077
+MemoryMax=192M
+CPUQuota=25%
+NoNewPrivileges=true
+PrivateTmp=true

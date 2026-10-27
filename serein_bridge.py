@@ -318,11 +318,15 @@ def suppress_legacy():
     return bool(bridge and bridge.config.get('replace_legacy'))
 
 
-def for_chat(session_id, user_message_id):
+def for_chat(session_id, user_message_id, db_path=None):
     bridge = configured()
     # Background activities and regenerated replies have no stable new user turn.
     if not bridge or not user_message_id:
         return None
+    if db_path:
+        import memory_outbox
+        if memory_outbox.quarantine(db_path):
+            return None
     return bridge
 
 

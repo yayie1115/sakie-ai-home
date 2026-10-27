@@ -1111,7 +1111,7 @@ def stream_chat(session_id, model=None, think=False, exclude_id=None, provider_i
     chosen = model or LLM_MODEL
     recall_query = latest_user_text(session_id, exclude_id=exclude_id)
     import serein_bridge
-    bridge = serein_bridge.for_chat(session_id, current_user_message_id)
+    bridge = serein_bridge.for_chat(session_id, current_user_message_id, db_path=DB_PATH)
     bridge_turn = None
     base_tools = tools.openai_tools(mcp_server_ids) if allow_tools else []
     if serein_bridge.suppress_legacy():

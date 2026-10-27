@@ -3677,6 +3677,13 @@
             <button class="add-btn" id="provAdd" aria-label="添加供应商"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg></button>
           </div>
           <div class="glass-card"><div id="provList"></div></div>
+          <div class="glass-card" id="memoryModelSettings">
+            <div class="field"><label for="memoryEmbedding">记忆向量模型</label><select id="memoryEmbedding"><option value="">未配置</option></select></div>
+            <div class="field"><label for="memoryReranker">记忆重排序模型</label><select id="memoryReranker"><option value="">未配置</option></select></div>
+            <div class="caption">独立于聊天模型。bge-m3 用于向量，不能代替 Reranker。密钥只保存在服务端。</div>
+            <div class="add-row" style="margin-top:12px"><button class="mini-btn" id="memoryModelsSave" type="button">保存记忆模型</button><button class="mini-btn" id="memoryEmbeddingCheck" type="button">验证向量</button><button class="mini-btn" id="memoryRerankerCheck" type="button">验证重排序</button></div>
+            <div class="caption" id="memoryModelsStatus" role="status" aria-live="polite">尚未读取记忆配置</div>
+          </div>
         </div>
         <!-- 供应商编辑 -->
         <div id="prov-edit-view" hidden>
@@ -9852,8 +9859,30 @@ let editingPid=null;   // provider id being edited, or null = adding new
 let editModels=[];     // working copy of the model list in the edit form
 async function loadProviders(){
   try{const r=await(await api("/api/providers")).json();PROVIDERS=Array.isArray(r)?r:[];}catch{PROVIDERS=[];}
-  renderProvList();renderAssistantModels();
+  renderProvList();renderAssistantModels();loadMemoryModels();
 }
+let memoryModelState=null;
+function paintMemoryModels(data){
+  memoryModelState=data;
+  for(const [role,id] of [["embedding","memoryEmbedding"],["reranker","memoryReranker"]]){
+    const select=$("#"+id);select.replaceChildren(new Option("未配置",""));
+    for(const p of data.providers||[])for(const m of p.models||[])select.add(new Option(p.name+" / "+(m.name||m.id),JSON.stringify({provider_id:p.provider_id,model_id:m.id})));
+    select.value=data[role]?JSON.stringify(data[role]):"";
+  }
+  const label=role=>!data[role]?"未配置":data.validation?.[role]?.status==="verified"?"接口已验证":"待验证或接口不可用";
+  $("#memoryModelsStatus").textContent="向量："+label("embedding")+"；重排序："+label("reranker")+"。自动召回："+(data.hook_enabled?"已启用（失败时正常聊天）":"待准备")+"。今日请求 "+(data.budget?.calls||0)+" / "+(data.budget?.call_limit||128)+"。原话自动同步未启用。";
+}
+async function loadMemoryModels(){try{const r=await api("/api/memory/models");if(r.ok)paintMemoryModels(await r.json());}catch{$("#memoryModelsStatus").textContent="记忆配置暂不可用，聊天不受影响";}}
+$("#memoryModelsSave").onclick=async()=>{
+  if(!memoryModelState)return;
+  const payload={revision:memoryModelState.revision,embedding:$("#memoryEmbedding").value?JSON.parse($("#memoryEmbedding").value):null,reranker:$("#memoryReranker").value?JSON.parse($("#memoryReranker").value):null};
+  try{const r=await api("/api/memory/models",{method:"PUT",body:JSON.stringify(payload)});const data=await r.json();if(!r.ok){toast(data.error||"没有保存");return;}paintMemoryModels(data);toast("记忆模型已保存，聊天模型未改变");}catch{toast("保存失败，请稍后重试");}
+};
+for(const [role,id] of [["embedding","memoryEmbeddingCheck"],["reranker","memoryRerankerCheck"]])$("#"+id).onclick=async()=>{
+  if(!memoryModelState?.[role]){toast("请先选择并保存模型");return;}
+  const button=$("#"+id);button.disabled=true;$("#memoryModelsStatus").textContent="正在使用极短虚构文本验证接口…";
+  try{const r=await api("/api/memory/models/validate",{method:"POST",body:JSON.stringify({role})});const data=await r.json();if(r.ok)paintMemoryModels(data);else toast(data.error||"验证失败");}catch{toast("验证未完成，聊天不受影响");}finally{button.disabled=false;}
+};
 function renderProvList(){
   const el=$("#provList");if(!el)return;el.innerHTML="";
   if(!PROVIDERS.length){el.innerHTML='<div class="prov-empty caption">还没有供应商。点右上角 ＋ 添加一个。</div>';return;}
@@ -9880,7 +9909,8 @@ function openProvEdit(p,recordHistory=true,animate=true){
   $("#provFormat").value=p?p.format:"openai";
   $("#provFormatButton").textContent=$("#provFormat").value==="claude"?"Anthropic":"OpenAI";
   $("#provName").value=p?p.name:"";
-  $("#provKey").value=p?p.api_key:"";
+  $("#provKey").value="";
+  $("#provKey").placeholder=p?.api_key_configured?"已保存，留空保持不变":"填写 API Key";
   $("#provUrl").value=p?p.api_url:"";
   $("#provCache").checked=p?p.cache:false;
   $("#provCacheMode").value=p?(p.cache_mode||"anthropic_explicit_sticky"):"anthropic_explicit_sticky";
@@ -9977,7 +10007,7 @@ async function manualAddModel(){
   if(id!==null)addModelById(id);
 }
 $("#provFetch").onclick=async()=>{
-  const body={api_url:$("#provUrl").value.trim(),api_key:$("#provKey").value.trim(),format:$("#provFormat").value};
+  const body={provider_id:editingPid,api_url:$("#provUrl").value.trim(),api_key:$("#provKey").value.trim(),format:$("#provFormat").value};
   if(!body.api_url){toast("先填 API URL");return;}
   toast("获取中…");
   try{

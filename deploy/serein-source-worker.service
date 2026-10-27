@@ -1,0 +1,16 @@
+[Unit]
+Description=Guarded source outbox delivery (disabled pending withdrawal certification)
+After=morrow.service serein.service
+
+[Service]
+Type=oneshot
+User=morrow
+Group=morrow
+Environment=MORROW_SEREIN_CONFIG=/etc/morrow-serein/config.json
+WorkingDirectory=/opt/morrow
+ExecStart=/opt/morrow/.venv/bin/python /opt/morrow/serein_source_worker.py --database /opt/morrow/data/nook.db
+UMask=0077
+MemoryMax=128M
+CPUQuota=20%
+NoNewPrivileges=true
+PrivateTmp=true

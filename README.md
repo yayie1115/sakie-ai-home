@@ -31,6 +31,12 @@ Raw transcript automatic synchronization is **not enabled**: the pinned Serein s
 
 Deployment examples use a dedicated Python-only service, loopback access, CPU/memory limits and an optional daily encrypted-backup timer. They do not expose a Serein management website, change DNS or replace Morrow's frontend. The pinned upstream version is recorded in `deploy/serein.config.example.toml`; do not update it automatically.
 
+Memory model choices are now separate controls in Settings → Providers. They store provider/model references rather than credentials. The authenticated `/api/memory/models` API supports revision-checked selection and explicit tiny synthetic validation. Stored provider keys are no longer returned by provider-edit APIs; leaving the key input blank preserves the existing value. Fetching a saved provider's model list reuses its key only if the origin and protocol still match.
+
+The loopback `/internal/memory-models` broker resolves saved credentials on each request, validates response shapes and applies a shared daily limit of 128 provider requests / 20,000 input characters. Serein receives only the broker's private service token. `serein_model_sync.py` refreshes references without inference; `--prepare` is an explicit budgeted operation that prepares indexes/routes. Model selection or selected-provider changes disable Hook until verified preparation. An underlying provider URL change selects a separate index namespace.
+
+`memory_outbox.py` installs additive control/outbox tables and transactional message/session triggers **disabled by default**, without historical backfill. `serein_source_worker.py` is guarded by the existing false withdrawal capability; do not enable its timer. `serein_source_projection.py` is an isolated candidate that can revoke explicitly bound evidence while retaining private source history, not a registered production receiver. Frozen pipeline jobs, unbound authored Scenes and legacy Event reprojection are not yet certified, so real source sync and automatic Event remain off.
+
 **English** | [简体中文](README.zh-CN.md)
 
 Morrow is a private, self-hosted home for long-running AI conversations. It keeps the chat surface calm while memory, tools, model routing, summaries, scheduled activities, backups, and usage records stay behind the wall.

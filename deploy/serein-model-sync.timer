@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh saved memory model references without copying provider keys
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=1m
+
+[Install]
+WantedBy=timers.target

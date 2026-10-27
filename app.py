@@ -1235,6 +1235,8 @@ def init_db():
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
         )
     conn.commit()
+    import memory_outbox
+    memory_outbox.initialize(conn)
     conn.close()
 
 
@@ -5358,8 +5360,7 @@ def http_logs():
 # API 供应商（设置 → 提供商）
 # ---------------------------------------------------------------------------
 def _provider_dict(row):
-    """Row → JSON-safe dict. The api_key is included as-is so the edit screen can
-    show it; this is a private, password-gated app on the user's own server."""
+    """Return editable metadata, never send stored credentials to a browser."""
     try:
         models = json.loads(row["models"]) if row["models"] else []
     except (TypeError, ValueError):
@@ -5368,7 +5369,8 @@ def _provider_dict(row):
         "id": row["id"],
         "name": row["name"],
         "format": row["format"],
-        "api_key": row["api_key"],
+        "api_key": "",
+        "api_key_configured": bool(row["api_key"]),
         "api_url": row["api_url"],
         "cache": bool(row["cache"]),
         "cache_mode": row["cache_mode"] or ("anthropic_explicit_sticky" if row["cache"] else "none"),
@@ -5539,19 +5541,24 @@ def create_provider():
 def update_provider(pid):
     data = request.get_json(silent=True) or {}
     db = get_db()
-    if db.execute("SELECT 1 FROM providers WHERE id = ?", (pid,)).fetchone() is None:
+    existing = db.execute("SELECT api_key FROM providers WHERE id = ?", (pid,)).fetchone()
+    if existing is None:
         return jsonify({"error": "not found"}), 404
     name = (data.get("name") or "").strip()
     if not name:
         return jsonify({"error": "name required"}), 400
     fmt = "claude" if data.get("format") == "claude" else "openai"
+    import memory_models
+    selected_memory = memory_models.load(db)
+    if any((selected_memory.get(role) or {}).get('provider_id') == pid for role in memory_models.ROLES):
+        memory_models.disable_hook()
     db.execute(
         "UPDATE providers SET name = ?, format = ?, api_key = ?, api_url = ?, "
         "cache = ?, cache_mode = ?, models = ? WHERE id = ?",
         (
             name,
             fmt,
-            (data.get("api_key") or "").strip(),
+            ((data.get("api_key") or "").strip() or existing["api_key"]),
             (data.get("api_url") or "").strip(),
             1 if data.get("cache") else 0,
             _clean_cache_mode(data.get("cache_mode"), bool(data.get("cache"))),
@@ -5568,6 +5575,10 @@ def update_provider(pid):
 @require_auth
 def delete_provider(pid):
     db = get_db()
+    import memory_models
+    selected_memory = memory_models.load(db)
+    if any((selected_memory.get(role) or {}).get('provider_id') == pid for role in memory_models.ROLES):
+        memory_models.disable_hook()
     db.execute("DELETE FROM providers WHERE id = ?", (pid,))
     db.commit()
     return jsonify({"ok": True})
@@ -9414,6 +9425,12 @@ def fetch_provider_models():
     url = (data.get("api_url") or "").strip().rstrip("/")
     key = (data.get("api_key") or "").strip()
     fmt = data.get("format") or "openai"
+    if not key and data.get('provider_id'):
+        saved = get_db().execute('SELECT api_url,api_key,format FROM providers WHERE id=?',
+                                 (data['provider_id'],)).fetchone()
+        # Never forward a saved credential to a newly entered host or protocol.
+        if saved and saved['api_url'].rstrip('/') == url and saved['format'] == fmt:
+            key = saved['api_key']
     if not url:
         return jsonify({"error": "api_url required"}), 400
     try:
@@ -9422,10 +9439,10 @@ def fetch_provider_models():
         else:
             headers = {"Authorization": f"Bearer {key}"}
         resp = requests.get(f"{url}/models", headers=headers, timeout=15)
-    except requests.RequestException as e:
-        return jsonify({"error": f"连不上：{e}"}), 502
+    except requests.RequestException:
+        return jsonify({"error": "模型目录连接失败"}), 502
     if resp.status_code != 200:
-        return jsonify({"error": f"供应商返回 {resp.status_code}：{resp.text[:200]}"}), 502
+        return jsonify({"error": f"供应商返回 HTTP {resp.status_code}"}), 502
     try:
         body = resp.json()
     except ValueError:
@@ -9934,6 +9951,8 @@ def delete_favorite(fid):
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
+import memory_models
+memory_models.register(app, get_db, require_auth)
 init_db()
 
 if __name__ == "__main__":
