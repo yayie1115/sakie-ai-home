@@ -45,6 +45,10 @@ def synchronize(settings, origin, token, *, prepare=False):
 
 
 def main():
+    # This existing maintenance process also opens the canonical database.
+    # Register the same epoch functions; do not create guards or enable sources.
+    from serein_source_guard import install_runtime
+    install_runtime()
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True, type=Path)
     parser.add_argument('--morrow-origin', default='http://127.0.0.1:5151')

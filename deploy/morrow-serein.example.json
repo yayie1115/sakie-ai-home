@@ -9,5 +9,6 @@
   "tools_enabled": false,
   "replace_legacy": false,
   "raw_sync_enabled": false,
+  "source_gateway_enabled": false,
   "recall_timeout": 2
 }

@@ -11,6 +11,7 @@ from serein.core.store import Store,encode
 from serein.core.reader import Reader
 from serein_source_projection import Projector,SourceConflict
 import source_protocol
+import serein_source_guard as guard
 
 
 def main():
@@ -30,7 +31,7 @@ def main():
                     head['sequence']+1,head['sequence'],head['hash'])
             return envelopes[key]
         first=event('first');projector.apply(first);projector.apply(first)
-        with Store(settings.database) as store:
+        with guard.scope(settings.database,authoring=True), Store(settings.database) as store:
             assert store.conn.execute('select count(*) from raw_events').fetchone()[0]==1
             raw=store.conn.execute('select * from raw_events').fetchone()
             source=store.add_source(encode([raw['source'],raw['session_id'],raw['source_event_id']]),raw['text'])
@@ -90,8 +91,8 @@ def main():
         passed.append('morrow_wall_clock_explicit_utc8_original_retained')
     import json
     print(json.dumps({'passed':len(passed),'checks':passed,
-        'not_verified':['frozen_inflight_pipeline_epoch_barrier','unbound_scene_provenance','fact_event_shadow_reprojection'],
-        'production_receiver_registered':False}))
+        'separate_acceptance_required':['full_host_context_dependencies','independent_memory_writers','automatic_event_pipeline'],
+        'registers_production_routes':False}))
 
 
 if __name__=='__main__':main()

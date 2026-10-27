@@ -188,6 +188,33 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(seen['kwargs']['base_tool_definitions'], [])
 
 
+    def test_bound_gateway_refuses_missing_context_without_mcp_fallback(self):
+        self.client.config['source_gateway_enabled']=True
+        result=self.client.execute('serein_write_scene',{'content':'fiction'},'w','turn')
+        self.assertEqual(result['error'],'source_context_incomplete')
+        self.mcp.call_tool.assert_not_called()
+
+    def test_bound_gateway_timeout_does_not_blindly_repeat_write(self):
+        self.client.config['source_gateway_enabled']=True
+        context={'instance_id':'synthetic','session_id':1,'sources':[],'epoch':0}
+        self.transport.post.side_effect=TimeoutError()
+        first=self.client.execute('serein_write_scene',{'content':'fiction'},'w','turn',host_context=context)
+        second=self.client.execute('serein_write_scene',{'content':'fiction'},'w','turn',host_context=context)
+        self.assertFalse(first['ok']);self.assertFalse(second['ok'])
+        self.assertEqual(self.transport.post.call_count,1)
+        self.mcp.call_tool.assert_not_called()
+
+    def test_explicit_transactional_rejection_is_not_unknown_write(self):
+        self.client.config['source_gateway_enabled']=True
+        context={'instance_id':'synthetic','session_id':1,'sources':[],'epoch':0}
+        response=self.transport.post.return_value
+        response.status_code=409;response.json.return_value={'error':'source_conflict_review_required'}
+        for turn in ('first','first','later'):
+            result=self.client.execute('serein_write_scene',{'content':'fiction'},'w',turn,host_context=context)
+            self.assertEqual(result['error'],'source_write_rejected')
+        self.assertEqual(self.transport.post.call_count,2)
+
+
 class AruTests(unittest.TestCase):
     SAMPLE = '# 虚构会话\n\n## 你 | 2026-10-24T16:00:00+08:00\n虚构问候\n\n---\n\n## 谢亦言 | 2026-10-24T16:00:01+08:00\n虚构回答\n![图](attachments/demo.png)\n'
 

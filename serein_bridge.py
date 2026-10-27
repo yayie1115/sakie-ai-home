@@ -4,6 +4,7 @@ Raw synchronization remains capability-gated: this pinned upstream has no
 verified retract/version protocol. Changing a boolean cannot bypass that gate.
 """
 import hashlib
+from contextlib import contextmanager
 import json
 import logging
 import os
@@ -58,10 +59,15 @@ class Ledger:
             """)
         os.chmod(path, 0o600)
 
+    @contextmanager
     def connect(self):
         db = sqlite3.connect(self.path, timeout=5)
         db.row_factory = sqlite3.Row
-        return db
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     def recent(self, window):
         with self.connect() as db:
@@ -86,7 +92,7 @@ class Ledger:
             if old:
                 if old['fingerprint'] != fingerprint:
                     raise Conflict('Operation identity conflicts')
-                if old['state'] == 'succeeded':
+                if old['state'] in ('succeeded','rejected'):
                     return json.loads(old['result'])
                 raise Conflict('Operation outcome unknown; inspect before retrying')
             # Block another turn from blindly repeating an unresolved write.
@@ -98,6 +104,10 @@ class Ledger:
     def complete(self, identifier, result):
         with self.connect() as db:
             db.execute("UPDATE operations SET state='succeeded',result=? WHERE id=?", (canonical(result), identifier))
+
+    def reject(self, identifier, result):
+        with self.connect() as db:
+            db.execute("UPDATE operations SET state='rejected',result=? WHERE id=?", (canonical(result),identifier))
 
     def enqueue(self, identifier, payload):
         with self.connect() as db:
@@ -204,12 +214,22 @@ class Bridge:
             raise Conflict('Raw archive confirmation failed')
         return 'archived'
 
-    def prepare(self, window, receipt, query):
+    def prepare(self, window, receipt, query, *, host_instance=None):
         if not self.config.get('hook_enabled') or not self.config.get('hook_ready'):
             return {'state': 'unconfigured', 'context': '', 'ids': []}
         if time.monotonic() < self._retry_after:
             return {'state': 'unavailable', 'context': '', 'ids': []}
         try:
+            source_epoch = None
+            if self.config.get('source_gateway_enabled'):
+                if not host_instance:raise ValueError('Host source instance required')
+                status=self.transport.post(self.base+'/bridge/source-status',
+                    headers={'Authorization':'Bearer '+self.token},json={'instance_id':host_instance},
+                    timeout=(.5,2),allow_redirects=False)
+                status.raise_for_status();state=status.json()
+                if state.get('instance_id')!=host_instance or type(state.get('epoch')) is not int:
+                    raise ValueError('Invalid source epoch')
+                source_epoch=state['epoch']
             response = self.transport.post(self.base + '/api/hook/recall',
                 headers={'Authorization': 'Bearer ' + self.token},
                 json={'query': query, 'session_id': window, 'delivered_ids': self.ledger.recent(window),
@@ -225,7 +245,8 @@ class Bridge:
                 raise ValueError('Invalid recall shape')
             if len(context) > 16000:
                 raise ValueError('Recall response exceeds budget')
-            return {'state': 'prepared', 'context': context, 'ids': ids, 'receipt': receipt, 'window': window}
+            return {'state': 'prepared', 'context': context, 'ids': ids, 'receipt': receipt, 'window': window,
+                    'source_epoch':source_epoch}
         except Exception:
             self._retry_after = time.monotonic() + 60
             LOG.warning('Serein recall unavailable; normal chat continues')
@@ -264,7 +285,7 @@ class Bridge:
             LOG.warning('Serein tools unavailable; normal chat continues')
         return self._definitions
 
-    def execute(self, name, args, window, turn_id):
+    def execute(self, name, args, window, turn_id, *, host_context=None):
         local = name.removeprefix('serein_')
         if name != 'serein_' + local or local not in ALLOWED_TOOLS:
             return None
@@ -276,6 +297,31 @@ class Bridge:
             return {**outcome, 'error': 'unverified_evidence', 'content': '尚未启用来源绑定，不能添加未经核实的原话证据。'}
         fingerprint = digest([window, local, args])
         identifier = digest([turn_id, fingerprint])
+        if self.config.get('source_gateway_enabled') and local in WRITES:
+            if not host_context:
+                return {**outcome,'error':'source_context_incomplete',
+                        'content':'本回合来源覆盖尚不完整，未保存记忆；正常聊天不受影响。'}
+            try:
+                previous=self.ledger.begin(identifier,fingerprint)
+                if previous is not None:return previous
+                response=self.transport.post(self.base+'/bridge/scene',
+                    headers={'Authorization':'Bearer '+self.token},
+                    json={**host_context,'operation_id':identifier,'tool':local,'arguments':args},
+                    timeout=(.5,8),allow_redirects=False)
+                if response.status_code in (400,401,403,409,503) and response.json().get('error') in {
+                        'source_conflict_review_required','invalid_source_request','source_instance_mismatch',
+                        'source_receiver_closed','source_storage_rejected','authentication_required'}:
+                    result={**outcome,'error':'source_write_rejected',
+                            'content':'来源状态变化或服务未启用，本次没有保存记忆；请勿把它当作已完成。'}
+                    self.ledger.reject(identifier,result)
+                    return result
+                response.raise_for_status();saved=response.json()
+                if saved.get('ok') is not True or not isinstance(saved.get('id'),str):raise ValueError()
+                result={**outcome,'ok':True,'content':saved['content'],'error':''}
+                self.ledger.complete(identifier,result)
+                return result
+            except Exception:
+                return outcome
         try:
             if local in WRITES:
                 previous = self.ledger.begin(identifier, fingerprint)

@@ -5,6 +5,7 @@ paths. They share the application's transaction, so rollback also rolls back
 events. There is no historical scan/backfill on installation.
 """
 import json
+import hashlib
 import sqlite3
 from contextlib import closing, contextmanager
 from pathlib import Path
@@ -179,3 +180,53 @@ def quarantine(db_path):
             return bool(row and row[0] and row[1])
     except sqlite3.Error:
         return True  # Unknown state cannot authorize external memory access.
+
+
+def source_context(db_path, session_id, records, epoch):
+    """Resolve the EXACT host history snapshot, never model-authored evidence.
+
+    `records` must come from get_history's original SQLite rows before model
+    generation, not a later reread or tool arguments. Missing coverage fails
+    closed; this function cannot reconstruct summary/tool-result provenance.
+    """
+    if type(epoch) is not int or epoch<0 or not isinstance(records,list) or not 1<=len(records)<=200:
+        return None
+    try:
+        with closing(sqlite3.connect(Path(db_path).resolve().as_uri()+'?mode=ro',uri=True)) as db:
+            db.row_factory=sqlite3.Row;db.execute('BEGIN')
+            control=db.execute('SELECT * FROM memory_bridge_control WHERE id=1').fetchone()
+            if not control or not control['enabled'] or control['recall_blocked']:
+                return None
+            refs=[];seen=set()
+            for record in records:
+                if (not isinstance(record,dict) or type(record.get('id')) is not int
+                        or type(record.get('active')) is not int or not isinstance(record.get('content'),str)):
+                    return None
+                key=record['id']
+                if key in seen:return None
+                seen.add(key)
+                current=db.execute('SELECT content,active,hidden,role FROM messages WHERE id=? AND session_id=?',
+                                   (key,session_id)).fetchone()
+                event=db.execute('SELECT * FROM memory_bridge_outbox WHERE message_id=? AND session_id=? ORDER BY sequence DESC LIMIT 1',
+                                 (key,session_id)).fetchone()
+                if not current or current['hidden'] or not event or event['kind']!='upsert' or event['state']!='acknowledged':
+                    return None
+                payload=json.loads(event['payload'])
+                if (payload.get('partial') or payload.get('hidden') or current['role'] not in ('user','assistant')
+                        or current['content']!=record['content'] or current['active']!=record['active']
+                        or payload['text']!=record['content'] or payload['active']!=record['active']):
+                    return None
+                refs.append({'message_id':key,'event_id':event['event_id'],'version':record['active'],
+                             'content_hash':hashlib.sha256(record['content'].encode()).hexdigest()})
+            return {'instance_id':control['instance_id'],'session_id':session_id,'sources':refs,'epoch':epoch}
+    except (sqlite3.Error,ValueError,KeyError,TypeError):
+        return None
+
+
+def source_instance(db_path):
+    try:
+        with closing(sqlite3.connect(Path(db_path).resolve().as_uri()+'?mode=ro',uri=True)) as db:
+            row=db.execute('SELECT instance_id,enabled,recall_blocked FROM memory_bridge_control WHERE id=1').fetchone()
+            return row[0] if row and row[1] and not row[2] else None
+    except (sqlite3.Error,OSError):
+        return None

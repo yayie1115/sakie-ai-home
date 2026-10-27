@@ -712,7 +712,7 @@ def _history_time_prefix(created_at):
 
 def get_history(session_id, limit=HISTORY_LIMIT, exclude_id=None, include_images=True,
                 image_limit=None, latest_images_only=False, image_variant="original",
-                current_user_message_id=None):
+                current_user_message_id=None, source_records=None):
     """Recent messages for a session as OpenAI-format dicts, oldest first.
 
     `content` already mirrors each message's *active* version, so the context
@@ -770,6 +770,8 @@ def get_history(session_id, limit=HISTORY_LIMIT, exclude_id=None, include_images
     rows = conn.execute(sql, params).fetchall()
     if limit is not None:
         rows = list(reversed(rows))
+    if source_records is not None:
+        source_records.extend({'id':r['id'],'content':r['content'],'active':r['active']} for r in rows)
 
     descriptions = {}
     message_ids = [r["id"] for r in rows if r["role"] == "user"]
@@ -1113,6 +1115,8 @@ def stream_chat(session_id, model=None, think=False, exclude_id=None, provider_i
     import serein_bridge
     bridge = serein_bridge.for_chat(session_id, current_user_message_id, db_path=DB_PATH)
     bridge_turn = None
+    host_sources=[]
+    host_source_context=None
     base_tools = tools.openai_tools(mcp_server_ids) if allow_tools else []
     if serein_bridge.suppress_legacy():
         base_tools = [item for item in base_tools
@@ -1121,13 +1125,24 @@ def stream_chat(session_id, model=None, think=False, exclude_id=None, provider_i
         instance = bridge.config['instance_id']
         window = f'{instance}:{session_id}'
         receipt = f'{window}:{current_user_message_id}'
-        bridge_turn = bridge.prepare(window, receipt, recall_query)
+        if bridge.config.get('source_gateway_enabled'):
+            import memory_outbox
+            bridge_turn=bridge.prepare(window,receipt,recall_query,host_instance=memory_outbox.source_instance(DB_PATH))
+        else:
+            bridge_turn = bridge.prepare(window, receipt, recall_query)
         if allow_tools:
             extra_tools = list(extra_tools or []) + bridge.definitions()
             prior_executor = extra_executor
 
             def bridge_executor(name, args, sid):
-                result = bridge.execute(name, args, window, receipt)
+                context=host_source_context
+                if context is not None:
+                    import memory_outbox
+                    context=memory_outbox.source_context(DB_PATH,session_id,host_sources,context['epoch'])
+                if bridge.config.get('source_gateway_enabled') and context is None and name.startswith('serein_'):
+                    return {'ok':False,'content':'记忆来源正在核对，本次不读取或写入外部记忆。',
+                            'error':'source_context_incomplete','duration_ms':0,'source':'mcp','server':'Serein'}
+                result = bridge.execute(name, args, window, receipt, host_context=context)
                 return result if result is not None else (prior_executor(name, args, sid) if prior_executor else None)
 
             extra_executor = bridge_executor
@@ -1173,7 +1188,17 @@ def stream_chat(session_id, model=None, think=False, exclude_id=None, provider_i
         image_limit=image_limit,
         latest_images_only=latest_images_only,
         current_user_message_id=current_user_message_id,
+        source_records=host_sources if bridge and bridge.config.get('source_gateway_enabled') else None,
     )
+    if bridge and bridge.config.get('source_gateway_enabled'):
+        # Existing summaries, recall cards, attachments and replayed tool output
+        # do not yet carry a complete dependency manifest. Do not attach a few
+        # recent messages and misrepresent them as coverage of the entire input.
+        if not conversation_summary and not bridge_turn.get('context') and not any(
+                row.get('tool_calls') or row.get('role')=='tool' or not isinstance(row.get('content'),str) for row in history):
+            import memory_outbox
+            host_source_context=memory_outbox.source_context(DB_PATH,session_id,host_sources,
+                                                            bridge_turn.get('source_epoch'))
     tool_history = (
         get_history(
             session_id,

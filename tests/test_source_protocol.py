@@ -168,5 +168,38 @@ class OrderedSourceTest(unittest.TestCase):
         self.db.execute('UPDATE memory_bridge_control SET enabled=0'); self.db.commit()
         backup_service._check_memory_source_restore(self.db)
 
+    def test_trusted_context_uses_saved_host_version_not_model_quotes(self):
+        self.add(1);self.drain()
+        context=outbox.source_context(self.path,1,[{'id':1,'content':'synthetic 1','active':0}],0)
+        self.assertEqual(context['instance_id'],self.instance)
+        self.assertEqual(context['sources'][0]['version'],0)
+        self.assertNotIn('text',context['sources'][0])
+        self.assertEqual(outbox.source_instance(self.path),self.instance)
+
+    def test_pending_capture_does_not_claim_archival_evidence(self):
+        self.add(1)
+        self.assertIsNone(outbox.source_context(self.path,1,[{'id':1,'content':'synthetic 1','active':0}],0))
+
+    def test_edit_during_generation_revokes_exact_context_snapshot(self):
+        self.add(1);self.drain()
+        snapshot=[{'id':1,'content':'synthetic 1','active':0}]
+        self.assertIsNotNone(outbox.source_context(self.path,1,snapshot,0))
+        self.db.execute("UPDATE messages SET content='new synthetic version' WHERE id=1");self.db.commit()
+        self.assertIsNone(outbox.source_context(self.path,1,snapshot,0))
+        self.assertIsNone(outbox.source_instance(self.path))
+
+    def test_context_cannot_cross_session_or_forge_content_version(self):
+        self.add(1);self.drain()
+        for session,record in [(2,{'id':1,'content':'synthetic 1','active':0}),
+                               (1,{'id':1,'content':'forged','active':0}),
+                               (1,{'id':1,'content':'synthetic 1','active':1})]:
+            self.assertIsNone(outbox.source_context(self.path,session,[record],0))
+
+    def test_disabled_source_and_unknown_epoch_cannot_bind_context(self):
+        self.add(1);self.drain();record=[{'id':1,'content':'synthetic 1','active':0}]
+        self.assertIsNone(outbox.source_context(self.path,1,record,None))
+        self.db.execute('UPDATE memory_bridge_control SET enabled=0');self.db.commit()
+        self.assertIsNone(outbox.source_context(self.path,1,record,0))
+
 
 if __name__ == '__main__': unittest.main()

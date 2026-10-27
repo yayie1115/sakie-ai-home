@@ -168,6 +168,26 @@ Run tests in a separate checkout without a personal `.env` or runtime data. Set 
 
 The automated suite lives in `tests/`. `scripts/stream_chat.py` is an optional manual diagnostic that calls the configured model provider and writes a raw stream log under `data/`; it is not part of the test suite. Review and redact that log before sharing it.
 
+## Optional guarded source receiver
+
+`serein_source_host.py` wraps only the audited Serein revision. The example
+`deploy/serein.service` retains loopback binding and resource limits; it does
+not install Serein, select models, or enable automatic Event processing.
+Use the existing initialized schema v9 instance and private token/config files.
+The separate `deploy/serein-source-policy.example.json` defaults to closed.
+
+Source receipts, revisions, epoch barriers, shadow invalidation and Scene host
+dependencies are additive. `source_gateway_enabled` also defaults to false.
+Keep both the receiver policy and host export disabled until full context
+provenance and every memory-writing path have been certified. Incomplete host
+context must fail closed rather than bind guessed evidence. Ordinary chat
+continues when the optional memory integration is unavailable.
+
+Do not prune source/outbox receipts or restore a legacy ZIP over a synchronized
+database. Preserve full consistent instance backups and reconcile both cursors.
+Rollback the receiver to its closed state first; do not remove guards while
+bridge-derived records remain, and never overwrite newer chat with an old DB.
+
 ## Security notes
 
 - Never commit `.env`, `data/`, exports, or backups.
