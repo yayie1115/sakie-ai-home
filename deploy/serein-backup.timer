@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily encrypted Serein backup (no automatic deletion)
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+{
+  "enabled": false,
+  "base_url": "http://127.0.0.1:8011",
+  "token_file": "/etc/morrow-serein/api-token",
+  "ledger": "/var/lib/morrow-serein/bridge.db",
+  "instance_id": "replace-with-a-new-stable-instance-uuid",
+  "hook_enabled": true,
+  "hook_ready": false,
+  "tools_enabled": false,
+  "replace_legacy": false,
+  "raw_sync_enabled": false,
+  "recall_timeout": 2
+}

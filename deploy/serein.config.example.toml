@@ -1,0 +1,15 @@
+# Pinned upstream: ec9f99e8cbc5abf6c024e668760e5cf55884c3dd
+# Use absolute private paths appropriate to the dedicated instance.
+[storage]
+database = "/var/lib/serein/serein.db"
+index = "/var/lib/serein/recall-index.sqlite"
+[runtime]
+writable = true
+[recall]
+embedding_batch_size = 16
+embedding_concurrency = 1
+index_catch_up = false
+[extensions.event_pipeline]
+enabled = true
+[mcp]
+tools = ["read_memory", "recall_memory", "write_scene", "edit_scene", "set_scene_status"]

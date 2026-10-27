@@ -19,6 +19,18 @@ Code updates must preserve the runtime data directory, signing secret, authentic
 
 Future development should build on Morrow's existing Flask/SQLite and tool boundaries. The old project's feature plans are not automatically specifications for this codebase. Evaluate memory provenance, revisions and retrieval in isolation before production changes; this handoff does not implement those changes.
 
+## Optional Serein bridge
+
+The optional `serein_bridge.py` adapter keeps model calls and persona configuration in Morrow. It uses an explicitly configured loopback Serein instance, a restricted MCP tool allowlist, and a private sidecar ledger for successful recall deliveries and non-idempotent write outcomes. Missing configuration or a recall outage leaves normal chat usable. `deploy/morrow-serein.example.json` has safe defaults; no credential is included. Setting `MORROW_SEREIN_CONFIG` selects a private configuration file. Do not enable `hook_ready` before embedding, reranking and routes have been tested. `replace_legacy` suppresses old automatic memory injection and normal-chat memory write tools without deleting stored memories; background activity integration is not included.
+
+Raw transcript automatic synchronization is **not enabled**: the pinned Serein source lacks a verified source-edit/version/withdrawal transport. The durable outbox can detect identity/content conflicts but its sender is intentionally blocked, even if a configuration flag is changed. Scene reads/writes and host acknowledgements do not imply transcript synchronization or automatic Event generation. Unknown Scene write outcomes remain blocked across process restarts; inspect them before retrying. This guard does not provide cross-service exactly-once writes.
+
+`aru_import.py` is a pure preview converter for explicitly mapped, timezone-aware Aru-like Markdown. It never imports to a database or fetches attachments; actual Aru exports still need format verification. Retain original export bytes privately.
+
+`serein_backup.py` reuses Morrow's authenticated encryption to snapshot configured SQLite files, include private instance files and verify an actual isolated decryption/restore before publishing an encrypted backup. Restore targets must not exist. The backup does not automatically delete retention generations; keep independent offline recovery credentials and off-host copies. Derived indexes may be rebuilt after restore. Multi-root snapshots are not one atomic transaction: quiesce source writes for an authoritative cross-store recovery point.
+
+Deployment examples use a dedicated Python-only service, loopback access, CPU/memory limits and an optional daily encrypted-backup timer. They do not expose a Serein management website, change DNS or replace Morrow's frontend. The pinned upstream version is recorded in `deploy/serein.config.example.toml`; do not update it automatically.
+
 **English** | [简体中文](README.zh-CN.md)
 
 Morrow is a private, self-hosted home for long-running AI conversations. It keeps the chat surface calm while memory, tools, model routing, summaries, scheduled activities, backups, and usage records stay behind the wall.

@@ -9,3 +9,9 @@ Thank you for helping improve Morrow.
 5. Explain user-visible changes and any migration or privacy impact in the pull request.
 
 By contributing, you agree that your contribution is licensed under the MIT License.
+# Optional memory integration checks
+
+Run `python -m unittest discover -s tests -p "test_serein_bridge.py"` with synthetic environment values for the bridge, ledger, Aru preview and encrypted restore tests. The full standard unittest discovery includes these tests.
+
+`tests/serein_transport_check.py --python <isolated-Serein-interpreter>` is opt-in. It starts and removes only its newly created loopback synthetic instance; it cannot select an existing database or service URL. It makes no real model calls. Run with the Morrow interpreter so its existing HTTP dependencies are available. Do not substitute production configuration or credentials.
+

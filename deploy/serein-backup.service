@@ -1,0 +1,15 @@
+[Unit]
+Description=Verified encrypted Serein instance backup
+After=serein.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+WorkingDirectory=/opt/morrow
+ExecStart=/opt/morrow/.venv/bin/python /opt/morrow/serein_backup.py backup --root runtime=/var/lib/serein --root config=/etc/serein --root bridge=/var/lib/morrow-serein --root bridge_config=/etc/morrow-serein --destination /var/backups/morrow-serein/encrypted --passphrase-file /etc/morrow-serein-backup/passphrase
+MemoryMax=256M
+CPUQuota=25%
+NoNewPrivileges=true
+PrivateTmp=true
+
