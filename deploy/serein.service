@@ -12,7 +12,7 @@ Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 # Source policy is closed by default. This wrapper requires the audited,
 # unchanged upstream revision and an already initialized schema v9 database.
-ExecStart=/opt/serein/venv/bin/python /opt/morrow/serein_source_host.py --config /etc/serein/config.toml --policy /etc/serein/source-policy.json --port 8011
+ExecStart=/opt/serein/venv/bin/python /opt/morrow/serein_source_host.py --config /etc/serein/config.toml --policy /etc/serein/source-policy.json --upstream-root /opt/serein/source --port 8011
 Restart=on-failure
 RestartSec=10
 UMask=0077

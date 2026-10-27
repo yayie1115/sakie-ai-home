@@ -8,6 +8,10 @@ import sys
 import tempfile
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+import os
+import socket
+import time
+import urllib.request
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from serein.config import Settings
@@ -256,6 +260,41 @@ print(json.dumps(p.apply(json.load(open(sys.argv[3])))))
                              check=True,capture_output=True,text=True,timeout=30)
         assert json.loads(child.stdout)==protocol.acknowledgement(concurrent_event)
         passed.append('actual_new_process_preserves_epoch_and_receipt')
+        # Launch the REAL CLI using the installed wheel, not just app factories
+        # under a source PYTHONPATH. This catches deployment-entrypoint errors.
+        import serein.config as config_module
+        audited=Path(config_module.__file__).resolve().parents[2]
+        configuration=root/'server.toml'
+        configuration.write_text('[storage]\ndatabase='+json.dumps(str(settings.database))+
+            '\nindex='+json.dumps(str(settings.index))+'\n[runtime]\nwritable=true\n')
+        policy.write_text(json.dumps({'enabled':False,'instance_id':instance,'release':guard.VERSION}))
+        secret=root/'synthetic-http-token';secret.write_text('synthetic-entrypoint-only')
+        environment=dict(os.environ,PYTHONPATH=str(Path(__file__).resolve().parents[1]),
+                         SEREIN_HTTP_TOKEN_FILE=str(secret),PYTHONDONTWRITEBYTECODE='1')
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
+        command=[sys.executable,str(Path(__file__).resolve().parents[1]/'serein_source_host.py'),
+                 '--config',str(configuration),'--policy',str(policy),'--port',str(port),'--upstream-root',str(audited)]
+        with (root/'synthetic-entrypoint.log').open('wb') as log:
+            process=subprocess.Popen(command,env=environment,stdout=log,stderr=log)
+            try:
+                for attempt in range(80):
+                    if process.poll() is not None:raise AssertionError('Real receiver CLI failed to start')
+                    try:
+                        with urllib.request.urlopen(f'http://127.0.0.1:{port}/health',timeout=1) as response:
+                            if response.status==200:break
+                    except OSError:pass
+                    time.sleep(.25)
+                else:raise AssertionError('Real receiver CLI health timed out')
+                request=urllib.request.Request(f'http://127.0.0.1:{port}/bridge/capabilities',data=b'{}',
+                    headers={'Authorization':'Bearer synthetic-entrypoint-only','Content-Type':'application/json'})
+                with urllib.request.urlopen(request,timeout=3) as response:
+                    assert json.load(response)['source_enabled'] is False
+            finally:
+                process.terminate()
+                try:process.wait(timeout=20)
+                except subprocess.TimeoutExpired:process.kill();process.wait()
+        passed.append('real_installed_wheel_cli_startup_and_closed_receiver')
         print(json.dumps({'passed':len(passed),'checks':passed,'paid_model_calls':0,
             'production_source_enabled':False,'automatic_event_acceptance':False}))
 

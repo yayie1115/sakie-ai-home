@@ -7,6 +7,30 @@ import argparse
 import os
 from pathlib import Path
 import subprocess
+import hashlib
+
+
+def verify_upstream(root):
+    """Verify both the checkout and actually imported wheel/editable package."""
+    import serein.config
+    import serein_source_guard as guard
+    root=Path(root).resolve()
+    command=['git','--no-optional-locks','-c','safe.directory='+str(root),'-C',str(root)]
+    revision=subprocess.check_output(command+['rev-parse','HEAD'],text=True).strip()
+    changes=subprocess.check_output(command+['diff','--name-only','HEAD'],text=True).strip()
+    if revision!=guard.PINNED or changes:
+        raise ValueError('Source receiver requires the audited, unchanged upstream revision')
+    package=Path(serein.config.__file__).resolve().parent
+    files=subprocess.check_output(command+['ls-files','-z','src/serein'],text=True).split('\0')
+    checked=0
+    for name in filter(None,files):
+        relative=Path(name).relative_to('src/serein');source=root/name;loaded=package/relative
+        if (not source.is_file() or not loaded.is_file() or source.is_symlink() or loaded.is_symlink()
+                or hashlib.sha256(source.read_bytes()).digest()!=hashlib.sha256(loaded.read_bytes()).digest()):
+            raise ValueError('Imported Serein package differs from audited source')
+        checked+=1
+    if not checked:raise ValueError('Audited package manifest is empty')
+    return checked
 
 
 def create_guarded_app(settings, token, policy_path):
@@ -30,14 +54,13 @@ def main():
     parser.add_argument('--config',type=Path,required=True)
     parser.add_argument('--policy',type=Path,required=True)
     parser.add_argument('--port',type=int,default=8011)
+    parser.add_argument('--upstream-root',type=Path,required=True)
+    parser.add_argument('--check-upstream-only',action='store_true')
     args=parser.parse_args()
-    import serein
-    import serein_source_guard as guard
-    source=Path(serein.__file__).resolve().parents[2]
-    revision=subprocess.check_output(['git','-c','safe.directory='+str(source),'-C',str(source),'rev-parse','HEAD'],text=True).strip()
-    changes=subprocess.check_output(['git','-c','safe.directory='+str(source),'-C',str(source),'diff','--name-only','HEAD'],text=True).strip()
-    if revision!=guard.PINNED or changes:
-        raise ValueError('Source receiver requires the audited, unchanged upstream revision')
+    checked=verify_upstream(args.upstream_root)
+    if args.check_upstream_only:
+        print('PINNED_IMPORTED_PACKAGE_VERIFIED',checked)
+        return
     token_path=os.environ.get('SEREIN_HTTP_TOKEN_FILE')
     if not token_path:raise ValueError('Private HTTP token file required')
     token=Path(token_path).read_text(encoding='utf-8').strip()

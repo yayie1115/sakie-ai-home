@@ -175,6 +175,10 @@ The automated suite lives in `tests/`. `scripts/stream_chat.py` is an optional m
 not install Serein, select models, or enable automatic Event processing.
 Use the existing initialized schema v9 instance and private token/config files.
 The separate `deploy/serein-source-policy.example.json` defaults to closed.
+Pass `--upstream-root` for the fixed checkout; startup compares its tracked
+package files with the actually imported wheel or editable installation.
+Keep reviewed source readable by the service account; a private-backup umask
+must not make deployed source root-only. Private data/config modes stay private.
 
 Source receipts, revisions, epoch barriers, shadow invalidation and Scene host
 dependencies are additive. `source_gateway_enabled` also defaults to false.
