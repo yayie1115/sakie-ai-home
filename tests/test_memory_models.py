@@ -52,6 +52,14 @@ class MemoryModelsTest(unittest.TestCase):
         self.assertEqual(self.client.put('/api/memory/models',json={'revision':1,'api_key':'no'},headers=self.headers).status_code,400)
         self.assertEqual(self.client.put('/api/memory/models',json={'revision':1},headers={**self.headers,'Origin':'https://evil.example'}).status_code,403)
 
+    def test_unchanged_save_preserves_validated_state_and_hook(self):
+        self.save()
+        with patch.object(models,'disable_hook') as disable:
+            result=self.client.put('/api/memory/models',json={'revision':1,
+                'embedding':{'provider_id':1,'model_id':'embed'},'reranker':{'provider_id':1,'model_id':'rank'}},headers=self.headers)
+        self.assertEqual(result.status_code,200);self.assertEqual(result.json['revision'],1)
+        disable.assert_not_called()
+
     def test_https_proxy_origin_is_supported(self):
         result=self.client.put('/api/memory/models',json={'revision':0,'embedding':None,'reranker':None},
             headers={**self.headers,'Origin':'https://localhost','X-Forwarded-Proto':'https'})
@@ -137,6 +145,20 @@ class MemoryModelsTest(unittest.TestCase):
         write=next(call for call in db.execute.call_args_list if 'UPDATE providers' in call.args[0])
         self.assertEqual(write.args[1][2],'private-synthetic-value')
         self.assertNotIn('private-synthetic-value',result.get_data(as_text=True))
+
+    def test_provider_name_and_price_edit_does_not_disable_hook(self):
+        import app
+        db=Mock()
+        row={'id':1,'name':'renamed','format':'openai','api_key':'private-synthetic-value',
+             'api_url':'https://models.example.test/v1','cache':0,'cache_mode':'none','models':'[{"id":"embed"}]'}
+        db.execute.return_value.fetchone.side_effect=[row,row]
+        with app.app.test_client() as client:
+            with client.session_transaction() as state:state['authed']=True
+            with patch.object(app,'get_db',return_value=db),patch.object(models,'disable_hook') as disable, \
+                 patch.object(models,'load',return_value={'embedding':{'provider_id':1,'model_id':'embed'},'reranker':None}):
+                result=client.put('/api/providers/1',json={'name':'renamed','api_key':'','api_url':row['api_url'],
+                                                         'models':[{'id':'embed','price_input':0}]})
+        self.assertEqual(result.status_code,200);disable.assert_not_called()
 
 
 class TransactionalOutboxTest(unittest.TestCase):

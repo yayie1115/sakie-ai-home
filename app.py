@@ -5541,7 +5541,7 @@ def create_provider():
 def update_provider(pid):
     data = request.get_json(silent=True) or {}
     db = get_db()
-    existing = db.execute("SELECT api_key FROM providers WHERE id = ?", (pid,)).fetchone()
+    existing = db.execute("SELECT api_key,api_url,format,models FROM providers WHERE id = ?", (pid,)).fetchone()
     if existing is None:
         return jsonify({"error": "not found"}), 404
     name = (data.get("name") or "").strip()
@@ -5550,7 +5550,12 @@ def update_provider(pid):
     fmt = "claude" if data.get("format") == "claude" else "openai"
     import memory_models
     selected_memory = memory_models.load(db)
-    if any((selected_memory.get(role) or {}).get('provider_id') == pid for role in memory_models.ROLES):
+    affected = [selected_memory[role] for role in memory_models.ROLES
+                if (selected_memory.get(role) or {}).get('provider_id') == pid]
+    if affected and ((data.get('api_url') or '').strip().rstrip('/') != existing['api_url'].rstrip('/')
+            or fmt != existing['format']
+            or ((data.get('api_key') or '').strip() or existing['api_key']) != existing['api_key']
+            or any(item['model_id'] not in {m['id'] for m in _clean_models(data.get('models'))} for item in affected)):
         memory_models.disable_hook()
     db.execute(
         "UPDATE providers SET name = ?, format = ?, api_key = ?, api_url = ?, "

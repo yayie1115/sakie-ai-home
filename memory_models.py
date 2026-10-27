@@ -247,6 +247,8 @@ def register(app, get_db, require_auth, *, broker_secret=None):
                 selection = value.get(role)
                 if selection is not None:
                     resolve(db, selection)
+            if all(current.get(role) == value.get(role) for role in ROLES):
+                return jsonify(public_state(db))
             disable_hook()
             db.execute('BEGIN IMMEDIATE')
             if load(db)['revision'] != current['revision']:
