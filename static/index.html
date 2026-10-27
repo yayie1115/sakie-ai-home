@@ -9867,7 +9867,7 @@ function paintMemoryModels(data){
   for(const [role,id] of [["embedding","memoryEmbedding"],["reranker","memoryReranker"]]){
     const select=$("#"+id);select.replaceChildren(new Option("未配置",""));
     for(const p of data.providers||[])for(const m of p.models||[])select.add(new Option(p.name+" / "+(m.name||m.id),JSON.stringify({provider_id:p.provider_id,model_id:m.id})));
-    select.value=data[role]?JSON.stringify(data[role]):"";
+    select.value=data[role]?JSON.stringify({provider_id:data[role].provider_id,model_id:data[role].model_id}):"";
   }
   const label=role=>!data[role]?"未配置":data.validation?.[role]?.status==="verified"?"接口已验证":"待验证或接口不可用";
   $("#memoryModelsStatus").textContent="向量："+label("embedding")+"；重排序："+label("reranker")+"。自动召回："+(data.hook_enabled?"已启用（失败时正常聊天）":"待准备")+"。今日请求 "+(data.budget?.calls||0)+" / "+(data.budget?.call_limit||128)+"。原话自动同步未启用。";
