@@ -15,8 +15,8 @@
 |受限 MCP|复用 Morrow MCP 客户端，适配器只开放read_memory、recall_memory、write_scene、edit_scene、set_scene_status；不开放原话管理、配置、导入或流水线管理。正式私有MCP发现恰好5项|
 |Scene 写入/修订|真实回环HTTP/MCP合成实例通过；丢ACK/超时保留unknown并阻止盲重试；成功结果持久缓存。不是远端exactly-once保证，未知结果仍需人工核查|
 |来源证据|基础写Scene不暴露evidence_refs，拒绝模型伪造来源；Scene是主观表达，不能冒充已核实事实|
-|旧记忆去重|replace_legacy开关抑制旧固定/动态/Ombre自动注入与旧记忆写工具，不删除旧记录。Morrow人格、会话历史、摘要仍保留。后台自主活动尚未接新的Scene工具|
-|原话候选投递|独立SQLite outbox、稳定事件身份、内容冲突、inflight/ack状态、顺序恢复及远端入库前后核对已实现并合成验证；没有开启正式消息采集/投递，没有历史回填|
+|旧记忆去重|代码具备replace_legacy开关，但**正式保持false**，保留旧固定/动态/Ombre与记忆写工具。Serein自动召回未开启，不会出现两套自动注入；未来确认单一写入权威后才能切换。后台自主活动尚未接新的Scene工具|
+|原话候选投递|独立SQLite outbox、稳定事件身份、内容冲突、inflight/ack状态、顺序恢复及远端入库前后核对已实现并合成验证；没有注册正式消息采集/后台投递worker，没有历史回填。仍须补生产采集、版本/撤回事件接线，不是改开关即可完成|
 |编辑/选版本/删除传播|**未完成，正式同步硬性关闭**。固定上游缺少已验证的统一来源修订/撤回协议；SOURCE_RETRACTION_VERIFIED=false，改配置不能绕过。Scene自身软删除通过不等于原话撤回闭环通过|
 |Event 后台|扩展和任务生命周期已运行；阶段复用现有聊天连接，Writer并发1。auto_enabled=false，避免未经验证整理或费用。模型真实结构输出和源撤回尚未验证|
 |Aru|纯解析预览候选，支持显式会话ID、角色、ISO时区、顺序、相对附件引用、稳定ID/源hash；不写数据库、不抓附件。真实导出格式仍待核验|
@@ -65,3 +65,17 @@
 5. 真实Aru文件到来后先核对语法、时区与稳定身份，先独立候选库原文归档，再单独批准历史Event整理。现在不需要用户提供真实文件。
 
 当前Morrow原记忆管理页面仍管理原memory_entries，不会伪装显示Serein Scene。本批没有新增前端管理页面或公开管理站点；模型可通过受限工具读取保存的Scene。用户手机操作与真实模型效果仍待实际验收，代码通过不等于用户验收。
+
+## 正式部署最终核验
+
+- Morrow实际部署应用提交：`78bda6b9a123b64cad83545ec73153d2fb3713d6`。沿用原Gunicorn，确认无活跃聊天/夜间任务后优雅HUP重载，master PID不变；没有迁移主库。保留部署前程序引用和一致性数据库备份作为回退条件。
+- 只向私有环境文件追加集成配置文件路径，并在内存比较其余认证/模型变量完全不变。原人格、提供方和聊天数据没有被替换。
+- 正式开关：enabled=true、tools_enabled=true、hook_ready=false、raw_sync_enabled=false、replace_legacy=false；Event auto_enabled=false。语义召回、真实来源同步和自动Event仍未启用。
+- 自动审批最初拒绝了会在Hook未准备时抑制旧记忆的部署批次；该批次没有执行。之后采用明确更安全替代：保留replace_legacy=false，再完成部署。无需为了本批基础接线降低旧记忆能力。
+- 主站HTTPS、登录、会话读取均200，未认证会话读取401，空消息校验400且未创建记录；没有发起真实模型回复测试。
+- 正式Morrow库integrity_check为ok，schema与部署前一致；会话、消息、人格、提供方和旧记忆数量均保持。Serein正式库integrity_check为ok，raw_events/documents均为空，临时传输测试数据没有混入正式实例。
+- Serein服务和加密备份timer均enabled；已成功执行首份加密实例备份，其发布前经过真实解密、独立恢复和SQLite完整性检查。日备份04:30并有随机错峰，不自动删除历史备份。恢复凭据只在服务器私有文件，不在仓库或报告中；离机保管尚未完成。
+- 部署后瞬时cgroup内存：Serein约55.7MiB、记录峰值约56.2MiB；Morrow约52.1MiB。系统available约2484MiB，磁盘约46GiB可用。这是空库/低负载快照，不是历史导入或向量召回峰值保证。
+- SakieTouch、Phosphene relay保持active，Phosphene容器healthy；主站及两个独立网站HTTPS均200，没有更改Nginx/DNS/证书或重启这些独立服务。
+- 已跟踪源码的敏感模式扫描无命中；服务器内存中将真实认证/模型/实例/备份凭据与已跟踪源码作精确比对，结果零命中。没有复制凭据到测试或Git。
+- 本轮额外模型活动仅为免费模型目录GET，不调用推理；真实模型推理请求数0。GitHub Actions公共API查询遇限流，本报告没有声称远端CI已全部通过；上面的394项为实际VPS隔离副本执行结果。

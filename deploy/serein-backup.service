@@ -12,4 +12,3 @@ MemoryMax=256M
 CPUQuota=25%
 NoNewPrivileges=true
 PrivateTmp=true
-
