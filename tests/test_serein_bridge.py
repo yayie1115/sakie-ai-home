@@ -1,3 +1,4 @@
+from contextlib import closing
 import json
 from pathlib import Path
 import tempfile
@@ -30,6 +31,70 @@ class BridgeTests(unittest.TestCase):
             for name in ['read_memory', 'write_scene', 'edit_scene', 'pipeline_next']], 'http')
         self.mcp.call_tool.return_value = ('synthetic saved result', 'http')
         self.client = bridge.Bridge(self.config, self.transport, self.mcp)
+
+    def explicit_fixture(self):
+        path=Path(self.temp.name)/'explicit.db'
+        with closing(sqlite3.connect(path)) as db, db:
+            db.executescript('''CREATE TABLE memory_bridge_control(id INTEGER,enabled INTEGER,recall_blocked INTEGER);
+                INSERT INTO memory_bridge_control VALUES(1,0,0);
+                CREATE TABLE messages(id INTEGER,session_id INTEGER,role TEXT,content TEXT,attachments TEXT,hidden INTEGER);
+                INSERT INTO messages VALUES(1,1,'user','请记住：虚构项目「珊瑚台」的口令是 TEST-3141','[]',0);
+                INSERT INTO messages VALUES(2,1,'user','旧聊天，不能被本轮复制','[]',0);''')
+        self.client.config['explicit_text_memory_enabled']=True
+        return path
+
+    def test_explicit_text_uses_current_row_and_existing_idempotent_scene_writer(self):
+        path=self.explicit_fixture()
+        first=self.client.remember_explicit_text(path,1,1,'w','turn')
+        self.assertTrue(first['ok'])
+        args=self.mcp.call_tool.call_args.args[2]
+        self.assertIn('TEST-3141',args['content']);self.assertNotIn('旧聊天',args['content'])
+        self.assertEqual(args['cues'],['珊瑚台']);self.assertNotIn('evidence_refs',args)
+        self.assertEqual(self.client.remember_explicit_text(path,1,1,'w','turn'),first)
+        self.assertEqual(self.mcp.call_tool.call_count,1)
+
+    def test_explicit_text_does_not_capture_questions_negation_or_attachments(self):
+        path=self.explicit_fixture()
+        for text,attachments in [('你还记得上次吗','[]'),('请不要记住这条','[]'),('请记住这张图','[{"type":"image"}]')]:
+            with closing(sqlite3.connect(path)) as db, db:db.execute('UPDATE messages SET content=?,attachments=? WHERE id=1',(text,attachments))
+            self.assertIsNone(self.client.remember_explicit_text(path,1,1,'w','t'))
+        self.mcp.call_tool.assert_not_called()
+
+    def test_explicit_text_cannot_bypass_protected_source_mode(self):
+        path=self.explicit_fixture()
+        with closing(sqlite3.connect(path)) as db, db:db.execute('UPDATE memory_bridge_control SET enabled=1')
+        self.assertIsNone(self.client.remember_explicit_text(path,1,1,'w','t'))
+        self.client.config['source_gateway_enabled']=True
+        self.assertIsNone(self.client.remember_explicit_text(path,1,1,'w','t'))
+        self.mcp.call_tool.assert_not_called()
+
+    def test_explicit_text_timeout_is_not_retried_or_reported_saved(self):
+        path=self.explicit_fixture();self.mcp.call_tool.side_effect=TimeoutError()
+        self.assertFalse(self.client.remember_explicit_text(path,1,1,'w','t')['ok'])
+        self.assertFalse(self.client.remember_explicit_text(path,1,1,'w','t')['ok'])
+        self.assertEqual(self.mcp.call_tool.call_count,1)
+
+    def test_explicit_text_receipt_is_emitted_and_given_to_chat(self):
+        import chat_engine
+        self.client.config['explicit_text_memory_enabled']=True
+        outcome={'ok':True,'content':'已保存。\n[scene_id:synthetic-scene]','error':'','duration_ms':1,'source':'mcp','server':'Serein'}
+        seen={}
+        def generated(*args,**kwargs):
+            seen['system']=args[3];seen['tools']=kwargs['extra_tools']
+            yield 'delta','synthetic answer'
+        with patch.object(bridge,'for_chat',return_value=self.client), \
+             patch.object(self.client,'remember_explicit_text',return_value=outcome), \
+             patch.object(chat_engine,'get_provider',return_value={'base_url':'http://example.test/v1','api_key':'synthetic-only','format':'openai','id':1,'name':'synthetic'}), \
+             patch.object(chat_engine,'latest_user_text',return_value='synthetic'), \
+             patch.object(chat_engine,'build_system_sections',return_value={'stable':'unchanged persona','volatile':''}), \
+             patch.object(chat_engine,'get_conversation_summary',return_value=''), \
+             patch.object(chat_engine,'get_history',return_value=[]), \
+             patch.object(chat_engine.tools,'openai_tools',return_value=[]), \
+             patch.object(chat_engine,'_run_openai_tool_loop',side_effect=generated):
+            events=list(chat_engine.stream_chat(1,model='synthetic',current_user_message_id=8))
+        self.assertIn('unchanged persona',seen['system']);self.assertIn('[scene_id:synthetic-scene]',seen['system'])
+        self.assertTrue(any(kind=='tool_result' and value['ok'] for kind,value in events))
+        self.assertFalse(any(tool['function']['name']=='serein_write_scene' for tool in seen['tools']))
 
     def test_prepare_is_not_delivery(self):
         turn = self.client.prepare('w', 'r', '虚构问题')

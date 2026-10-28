@@ -4,10 +4,11 @@ Raw synchronization remains capability-gated: this pinned upstream has no
 verified retract/version protocol. Changing a boolean cannot bypass that gate.
 """
 import hashlib
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 import json
 import logging
 import os
+import re
 from pathlib import Path
 import sqlite3
 import threading
@@ -165,6 +166,34 @@ class Bridge:
         self._definitions = None
         self._discovered_at = 0
         self._retry_after = 0
+
+    def remember_explicit_text(self, db_path, session_id, message_id, window, receipt):
+        """Small text-only fallback for relays that never return tool_calls.
+
+        Only an explicit request in THIS new user row is eligible. This is an
+        ordinary independent Scene, not source archival or evidence binding.
+        Existing guards and UNKNOWN write receipts remain authoritative.
+        """
+        if (not self.config.get('explicit_text_memory_enabled') or self.config.get('source_gateway_enabled')
+                or self.config.get('raw_sync_enabled')):return None
+        import context_provenance
+        if context_provenance.active() is not None:return None
+        with closing(sqlite3.connect(Path(db_path).resolve().as_uri()+'?mode=ro',uri=True)) as db:
+            db.row_factory=sqlite3.Row
+            control=db.execute('SELECT enabled,recall_blocked FROM memory_bridge_control WHERE id=1').fetchone()
+            if not control or control['enabled'] or control['recall_blocked']:return None
+            row=db.execute("SELECT content,attachments,hidden FROM messages WHERE id=? AND session_id=? AND role='user'",
+                           (message_id,session_id)).fetchone()
+        if not row or row['hidden'] or json.loads(row['attachments'] or '[]'):return None
+        text=(row['content'] or '').strip()
+        if not text or len(text)>8000:return None
+        if re.search(r'不要(?:.{0,8})?(?:记住|保存)|不用记|别记|无需(?:记住|保存)',text):return None
+        if not re.search(r'(?:请|帮我|替我|麻烦).{0,10}(?:记住|记下来|记一下)|^(?:你要)?记住[：:,，\s]|请.{0,16}记忆工具.{0,8}保存',text,re.S):return None
+        cues=re.findall(r'「([^」]{1,40})」|“([^”]{1,40})”',text)
+        cues=[a or b for a,b in cues][:6] or ['用户指定记忆']
+        return self.execute('serein_write_scene',{'title':'普通聊天文本记忆',
+            'content':'用户明确要求保存的新聊天文本（独立记忆，未建立原话证据绑定）：\n'+text,
+            'cues':cues},window,receipt+':explicit-text')
 
     def archive_event(self, event):
         """Verifying append transport for synthetic tests/future gated worker only.

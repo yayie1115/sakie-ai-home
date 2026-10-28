@@ -9,6 +9,7 @@
   "tools_enabled": false,
   "replace_legacy": false,
   "prefer_scene_writes": false,
+  "explicit_text_memory_enabled": false,
   "raw_sync_enabled": false,
   "source_gateway_enabled": false,
   "recall_timeout": 2

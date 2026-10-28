@@ -29,6 +29,12 @@ memory reads (`replace_legacy=false`). It does not enable raw synchronization,
 source certification, or automatic Events. Scenes without source bindings
 remain explicitly unbound; the model decides when to call the memory tools.
 
+For text-only relays without structured function calls, the optional
+`explicit_text_memory_enabled` fallback saves only the current text message
+when the user explicitly asks to remember it. It uses the same Scene API and
+durable write ledger, returns the actual storage receipt to chat, and does not
+run historical extraction, source synchronization, or automatic Events.
+
 Raw transcript automatic synchronization is **not enabled**: the pinned Serein source lacks a verified source-edit/version/withdrawal transport. The durable outbox can detect identity/content conflicts but its sender is intentionally blocked, even if a configuration flag is changed. Scene reads/writes and host acknowledgements do not imply transcript synchronization or automatic Event generation. Unknown Scene write outcomes remain blocked across process restarts; inspect them before retrying. This guard does not provide cross-service exactly-once writes.
 
 `aru_import.py` is a pure preview converter for explicitly mapped, timezone-aware Aru-like Markdown. It never imports to a database or fetches attachments; actual Aru exports still need format verification. Retain original export bytes privately.

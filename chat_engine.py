@@ -1137,6 +1137,7 @@ def stream_chat(session_id, model=None, think=False, exclude_id=None, provider_i
     bridge_turn = None
     host_sources=[]
     host_source_context=None
+    explicit_memory=None
     base_tools = tools.openai_tools(mcp_server_ids) if allow_tools else []
     if serein_bridge.suppress_legacy():
         base_tools = [item for item in base_tools
@@ -1145,16 +1146,31 @@ def stream_chat(session_id, model=None, think=False, exclude_id=None, provider_i
         instance = bridge.config['instance_id']
         window = f'{instance}:{session_id}'
         receipt = f'{window}:{current_user_message_id}'
+        if bridge.config.get('explicit_text_memory_enabled'):
+            explicit_memory=bridge.remember_explicit_text(DB_PATH,session_id,current_user_message_id,window,receipt)
+            if explicit_memory is not None:
+                yield ('tool_start',{'tool':'serein_write_scene','narrate':'正在保存你指定的文本记忆','args':{}})
+                yield ('tool_result',{'tool':'serein_write_scene','narrate':'文本记忆保存结果','args':{},
+                       'result':explicit_memory['content'],**{key:explicit_memory[key] for key in
+                       ('ok','error','duration_ms','source','server')}})
+                volatile_extra='\n\n'.join(filter(None,[volatile_extra,
+                    '【本轮记忆操作回执】\n'+explicit_memory['content']+
+                    '\n以上是实际存储结果；失败时不得声称已保存，成功时无需重复保存同一条。']))
         if bridge.config.get('source_gateway_enabled'):
             import memory_outbox
             bridge_turn=bridge.prepare(window,receipt,recall_query,host_instance=memory_outbox.source_instance(DB_PATH))
         else:
             bridge_turn = bridge.prepare(window, receipt, recall_query)
         if allow_tools:
-            extra_tools = list(extra_tools or []) + bridge.definitions()
+            memory_tools=bridge.definitions()
+            if explicit_memory and explicit_memory['ok']:
+                memory_tools=[tool for tool in memory_tools if tool.get('function',{}).get('name')!='serein_write_scene']
+            extra_tools = list(extra_tools or []) + memory_tools
             prior_executor = extra_executor
 
             def bridge_executor(name, args, sid):
+                if name=='serein_write_scene' and explicit_memory and explicit_memory['ok']:
+                    return explicit_memory
                 context=host_source_context
                 if context is not None:
                     import memory_outbox
