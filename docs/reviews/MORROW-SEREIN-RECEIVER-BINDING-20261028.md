@@ -1,5 +1,7 @@
 # Morrow + Serein：Receiver 认证接线交接（2026-10-28 续）
 
+> 用户后续已停止扩展本架构，改为基础记忆实际可用优先。现已部署普通 Scene 读写、Hook 和明确新文本记忆兜底，并通过真实网站跨会话验证，见 [基础记忆上线记录](MORROW-SEREIN-BASIC-LIVE-20261028.md)。本文的高级来源开关继续关闭，不要自动续做七库或 Event 扩展。
+
 ## 本轮结论
 
 本轮实际完成了 `Trace → source_context → Bridge → HTTP Receiver → author_scene` 的认证接线，并在固定上游、独立合成数据库和真实临时服务进程中跑通。不是只连通接口：成功请求持久保存 Scene、上下文核验回执及依赖边；并发撤回后不能读取旧 Scene，旧索引不能恢复它。
