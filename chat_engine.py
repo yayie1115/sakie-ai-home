@@ -1146,6 +1146,11 @@ def stream_chat(session_id, model=None, think=False, exclude_id=None, provider_i
         instance = bridge.config['instance_id']
         window = f'{instance}:{session_id}'
         receipt = f'{window}:{current_user_message_id}'
+        if bridge.config.get('auto_text_memory_enabled'):
+            volatile_extra='\n\n'.join(filter(None,[volatile_extra,
+                '【记忆操作状态】普通聊天的长期记忆由后台异步判断和保存。没有实际成功回执时，'
+                '不要说“已经记住”“已保存到长期记忆”等完成表述；自然回应内容即可。'
+                '尚未召回不代表用户从未说过，可能正在后台整理。']))
         if bridge.config.get('explicit_text_memory_enabled'):
             explicit_memory=bridge.remember_explicit_text(DB_PATH,session_id,current_user_message_id,window,receipt)
             if explicit_memory is not None:
@@ -1160,6 +1165,12 @@ def stream_chat(session_id, model=None, think=False, exclude_id=None, provider_i
             import memory_outbox
             bridge_turn=bridge.prepare(window,receipt,recall_query,host_instance=memory_outbox.source_instance(DB_PATH))
         else:
+            if bridge.config.get('auto_text_memory_enabled') and explicit_memory is None:
+                try:
+                    import auto_text_memory
+                    auto_text_memory.wait_for_recent_other_session(DB_PATH,bridge,session_id,current_user_message_id)
+                except Exception:
+                    pass  # Memory availability cannot prevent an ordinary reply.
             bridge_turn = bridge.prepare(window, receipt, recall_query)
         if allow_tools:
             memory_tools=bridge.definitions()

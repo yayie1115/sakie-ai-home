@@ -35,6 +35,17 @@ when the user explicitly asks to remember it. It uses the same Scene API and
 durable write ledger, returns the actual storage receipt to chat, and does not
 run historical extraction, source synchronization, or automatic Events.
 
+`auto_text_memory_enabled` adds background semantic extraction for ordinary new
+text, using the same selected chat provider/model without function calls. The
+existing bridge ledger holds durable task states, bounded retry/error timing,
+deduplication hashes and Scene receipts; only Serein is used for memory recall.
+No historical messages are scanned. Newer preferences append dated records
+instead of overwriting old memories. The authenticated
+`GET /api/serein-memory/auto-status` reports progress without message bodies.
+Chat only enqueues work; first entry into another conversation may wait up to
+`auto_text_recall_wait` seconds (capped at 8) for a recent pending save. Other
+turns do not wait. Unconfirmed writes must not be described as already saved.
+
 Raw transcript automatic synchronization is **not enabled**: the pinned Serein source lacks a verified source-edit/version/withdrawal transport. The durable outbox can detect identity/content conflicts but its sender is intentionally blocked, even if a configuration flag is changed. Scene reads/writes and host acknowledgements do not imply transcript synchronization or automatic Event generation. Unknown Scene write outcomes remain blocked across process restarts; inspect them before retrying. This guard does not provide cross-service exactly-once writes.
 
 `aru_import.py` is a pure preview converter for explicitly mapped, timezone-aware Aru-like Markdown. It never imports to a database or fetches attachments; actual Aru exports still need format verification. Retain original export bytes privately.

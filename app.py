@@ -1277,6 +1277,13 @@ def logout():
     return jsonify({"ok": True})
 
 
+@app.get('/api/serein-memory/auto-status')
+@require_auth
+def automatic_text_memory_status():
+    import auto_text_memory, serein_bridge
+    return jsonify(auto_text_memory.status(serein_bridge.configured()))
+
+
 @app.get("/api/auth/check")
 def auth_check():
     return jsonify({"authed": bool(session.get("authed"))})
@@ -2958,6 +2965,13 @@ def chat_send():
     )
     db.commit()
 
+    # Queue only; semantic/model work never runs on the request thread.
+    try:
+        import auto_text_memory
+        queued=auto_text_memory.enqueue(DB_PATH,session_id,user_msg_id,data.get('provider_id'),model or chat_engine.LLM_MODEL)
+        if queued:auto_text_memory.start(DB_PATH)
+    except Exception:
+        app.logger.warning('Automatic memory enqueue failed; ordinary chat continues')
     return _sse_response(
         _stream_reply(session_id, user_msg_id=user_msg_id, model=model,
                       think=bool(data.get("think")), provider_id=data.get("provider_id"),
@@ -7134,6 +7148,11 @@ def start_night_scheduler():
         if _night_scheduler_started:
             return
         _night_scheduler_started = True
+        try:
+            import auto_text_memory
+            auto_text_memory.start(DB_PATH)
+        except Exception:
+            app.logger.warning('Automatic memory startup paused; ordinary chat continues')
         threading.Thread(
             target=_night_scheduler_loop,
             daemon=True,

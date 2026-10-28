@@ -40,6 +40,11 @@ class Conflict(ValueError):
     pass
 
 
+def explicit_memory_request(text):
+    if re.search(r'不要(?:.{0,8})?(?:记住|保存)|不用记|别记|无需(?:记住|保存)',text):return False
+    return bool(re.search(r'(?:请|帮我|替我|麻烦).{0,10}(?:记住|记下来|记一下)|^(?:你要)?记住[：:,，\s]|请.{0,16}记忆工具.{0,8}保存',text,re.S))
+
+
 class Ledger:
     """Separate private durable state, never added to the host's schema."""
     def __init__(self, path):
@@ -187,8 +192,7 @@ class Bridge:
         if not row or row['hidden'] or json.loads(row['attachments'] or '[]'):return None
         text=(row['content'] or '').strip()
         if not text or len(text)>8000:return None
-        if re.search(r'不要(?:.{0,8})?(?:记住|保存)|不用记|别记|无需(?:记住|保存)',text):return None
-        if not re.search(r'(?:请|帮我|替我|麻烦).{0,10}(?:记住|记下来|记一下)|^(?:你要)?记住[：:,，\s]|请.{0,16}记忆工具.{0,8}保存',text,re.S):return None
+        if not explicit_memory_request(text):return None
         cues=re.findall(r'「([^」]{1,40})」|“([^”]{1,40})”',text)
         cues=[a or b for a,b in cues][:6] or ['用户指定记忆']
         return self.execute('serein_write_scene',{'title':'普通聊天文本记忆',
