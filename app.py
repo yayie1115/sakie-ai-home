@@ -22,6 +22,7 @@ from urllib.parse import quote
 
 import requests
 import identity
+import context_provenance
 import greeting_settings
 import postcard_settings
 import together_settings
@@ -713,7 +714,7 @@ CREATE TABLE IF NOT EXISTS http_request_logs (
 
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
+        g.db = context_provenance.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
@@ -729,7 +730,7 @@ def close_db(_exc):
 def init_db():
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = context_provenance.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     sticker_cols = {r[1] for r in conn.execute("PRAGMA table_info(stickers)").fetchall()}
@@ -3389,7 +3390,7 @@ def _usage_numbers(raw):
 def _model_price(provider_id, model_id):
     if not provider_id or not model_id:
         return {}
-    conn = sqlite3.connect(DB_PATH)
+    conn = context_provenance.connect(DB_PATH)
     row = conn.execute("SELECT models FROM providers WHERE id = ?", (provider_id,)).fetchone()
     conn.close()
     if not row:
@@ -3463,6 +3464,7 @@ _active_chat_requests = 0
 _active_chat_requests_lock = threading.Lock()
 
 
+@context_provenance.stream_scope(lambda: DB_PATH)
 def _stream_reply_impl(session_id, user_msg_id=None, model=None, think=False, regen_id=None,
                   provider_id=None, context_limit=None, image_limit=None,
                   latest_images_only=False, cache_ttl="off", mcp_server_ids=None,
@@ -3475,14 +3477,14 @@ def _stream_reply_impl(session_id, user_msg_id=None, model=None, think=False, re
     that's how 重新生成 accumulates switchable versions.
     """
     _ombre_auto_sync_check(max_age_seconds=600)
-    title_conn = sqlite3.connect(DB_PATH)
+    title_conn = context_provenance.connect(DB_PATH)
     title_row = title_conn.execute(
         "SELECT title_state FROM sessions WHERE id = ?", (session_id,)
     ).fetchone()
     title_conn.close()
     vision_source_msg_id = user_msg_id
     if vision_source_msg_id is None:
-        vision_conn = sqlite3.connect(DB_PATH)
+        vision_conn = context_provenance.connect(DB_PATH)
         if regen_id:
             vision_row = vision_conn.execute(
                 "SELECT id FROM messages WHERE session_id=? AND role='user' AND id<? "
@@ -3536,7 +3538,7 @@ def _stream_reply_impl(session_id, user_msg_id=None, model=None, think=False, re
             "tool_log": tool_log, "partial": True, "error": error,
             "artifact_ids": [voice_artifact_id] if voice_artifact_id else [],
         }
-        checkpoint = sqlite3.connect(DB_PATH)
+        checkpoint = context_provenance.connect(DB_PATH)
         checkpoint.row_factory = sqlite3.Row
         try:
             if msg_id is None:
@@ -3592,7 +3594,7 @@ def _stream_reply_impl(session_id, user_msg_id=None, model=None, think=False, re
 
     def record_client_disconnect():
         """Keep the HTTP ledger explicit when the browser closes Morrow's stream."""
-        ledger = sqlite3.connect(DB_PATH)
+        ledger = context_provenance.connect(DB_PATH)
         try:
             provider = ledger.execute(
                 "SELECT id,name,format,api_url FROM providers WHERE id=?", (provider_id,)
@@ -3619,7 +3621,7 @@ def _stream_reply_impl(session_id, user_msg_id=None, model=None, think=False, re
         assistant message while retaining a distinct ``run_id``.
         """
         nonlocal msg_id
-        checkpoint = sqlite3.connect(DB_PATH)
+        checkpoint = context_provenance.connect(DB_PATH)
         try:
             if msg_id is None:
                 partial_version = [{
@@ -3696,7 +3698,7 @@ def _stream_reply_impl(session_id, user_msg_id=None, model=None, think=False, re
             checkpoint.commit()
         finally:
             checkpoint.close()
-    capability_conn = sqlite3.connect(DB_PATH)
+    capability_conn = context_provenance.connect(DB_PATH)
     voice_enabled = _voice_capability_enabled(capability_conn)
     capability_conn.close()
     stream_events = iter(chat_engine.stream_chat(
@@ -3743,7 +3745,7 @@ def _stream_reply_impl(session_id, user_msg_id=None, model=None, think=False, re
                 if payload.get("ok") and payload.get("artifact_id"):
                     voice_artifact_id = int(payload["artifact_id"])
                     voice_visible_text = str(payload.get("visible_text") or "")
-                    artifact_conn = sqlite3.connect(DB_PATH)
+                    artifact_conn = context_provenance.connect(DB_PATH)
                     artifact_conn.row_factory = sqlite3.Row
                     artifact_row = artifact_conn.execute(
                         "SELECT meta FROM message_artifacts WHERE id=?", (voice_artifact_id,)
@@ -3810,7 +3812,7 @@ def _stream_reply_impl(session_id, user_msg_id=None, model=None, think=False, re
     partial_error = stream_error if stream_error is not None and has_material else None
 
     # Persist in a fresh connection (g.db is request-bound; this runs post-view).
-    conn = sqlite3.connect(DB_PATH)
+    conn = context_provenance.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     full_reply, reply_attachments = _extract_assistant_sticker(conn, full_reply)
     if stream_error is not None and not has_material:
@@ -4114,6 +4116,7 @@ def recent_memory_recalls():
 
 @app.post("/api/memory/entries")
 @require_auth
+@context_provenance.owner_operation
 def create_entry():
     data = request.get_json(silent=True) or {}
     content = (data.get("content") or "").strip()
@@ -4139,6 +4142,7 @@ def create_entry():
 
 @app.put("/api/memory/entries/<int:entry_id>")
 @require_auth
+@context_provenance.owner_operation
 def update_entry(entry_id):
     data = request.get_json(silent=True) or {}
     db = get_db()
@@ -4163,6 +4167,7 @@ def update_entry(entry_id):
 
 @app.delete("/api/memory/entries/<int:entry_id>")
 @require_auth
+@context_provenance.owner_operation
 def delete_entry(entry_id):
     db = get_db()
     db.execute("DELETE FROM memory_entries WHERE id = ?", (entry_id,))
@@ -4644,7 +4649,7 @@ def _background_push_delivery(session_id, message_id, message, kind="message",
                               event_id=None, delay_seconds=0):
     if delay_seconds:
         time.sleep(delay_seconds)
-    db = sqlite3.connect(DB_PATH)
+    db = context_provenance.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     try:
         event = None
@@ -6651,7 +6656,7 @@ def _voice_letter_executor(session_id, run_id):
             return outcome(False, "声音信里没有可朗读的正文。", "empty script")
         if len(parsed["script"]) > 5000:
             return outcome(False, "声音信太长了，请缩短后再试。", "script too long")
-        conn = sqlite3.connect(DB_PATH)
+        conn = context_provenance.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         existing = conn.execute(
             "SELECT * FROM message_artifacts WHERE type='voice_letter' AND run_id=?", (run_id,)
@@ -8258,6 +8263,7 @@ def _rows_with_image_memories(db, rows):
     return copied
 
 
+@context_provenance.operation_scope(lambda: DB_PATH, "summary")
 def _run_compression_claimed(db, session_id, *, source, recent_count, target_tokens,
                              instruction, threshold_messages, threshold_tokens, min_batch_tokens,
                              observed_context_tokens, compression_engine,
@@ -8265,11 +8271,14 @@ def _run_compression_claimed(db, session_id, *, source, recent_count, target_tok
     checkpoint = db.execute(
         "SELECT * FROM conversation_summaries WHERE session_id = ?", (session_id,)
     ).fetchone()
+    if checkpoint and not context_provenance.readable(db,'summary',session_id):
+        checkpoint = None
     covered_id = checkpoint["covered_through_message_id"] if checkpoint else 0
     rows = db.execute(
         "SELECT id, role, content, attachments, created_at FROM messages "
         "WHERE session_id = ? ORDER BY id ASC", (session_id,)
     ).fetchall()
+    rows = [row for row in rows if context_provenance.readable(db,'message',row['id'])]
     rows = _rows_with_image_memories(db, rows)
     if source == "sleep":
         candidates = [
@@ -8325,6 +8334,15 @@ def _run_compression_claimed(db, session_id, *, source, recent_count, target_tok
     candidate_tokens = sum(_estimate_text_tokens(row["content"]) for row in candidates)
     trigger = "messages" if message_threshold_reached else "tokens"
 
+    trace = context_provenance.active()
+    if trace:
+        if checkpoint:
+            trace.prior_summary(db, session_id)
+        for candidate in candidates:
+            context_provenance.record(db, 'message', candidate['id'], {'content': candidate['content']})
+        if instruction:
+            trace.opaque('compression_instruction_without_source_identity')
+        trace.seal()
     config = _assistant_settings()["compress"]
     previous_snapshot = _snapshot_summary(checkpoint)
     new_covered_id = candidates[-1]["id"]
@@ -8373,6 +8391,7 @@ def _run_compression_claimed(db, session_id, *, source, recent_count, target_tok
          config.get("model") or "",
          config.get("provider_id"), config.get("prompt") or ""),
     )
+    context_provenance.bind(db, "summary", session_id)
     version_id = _insert_summary_version(
         db, session_id=session_id, source=source, status="active", summary=summary,
         previous_snapshot=previous_snapshot, covered_from=candidates[0]["id"],
@@ -8545,6 +8564,7 @@ def list_summary_versions():
 
 @app.post("/api/tidy/summaries/<int:version_id>/edit")
 @require_auth
+@context_provenance.owner_operation
 def edit_summary_version(version_id):
     data = request.get_json(silent=True) or {}
     summary = str(data.get("summary") or "").strip()

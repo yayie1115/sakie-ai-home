@@ -295,6 +295,12 @@ class Bridge:
             return outcome
         if 'evidence_refs' in args:
             return {**outcome, 'error': 'unverified_evidence', 'content': '尚未启用来源绑定，不能添加未经核实的原话证据。'}
+        # Opt-in host manifests do not yet constitute a receiver-authenticated
+        # context receipt. Never downgrade a guarded turn to unbound native MCP.
+        import context_provenance
+        if local in WRITES and context_provenance.active() is not None:
+            return {**outcome, 'error': 'context_receipt_unverified',
+                    'content': '完整上下文来源尚未通过双端核验，本次未保存记忆。'}
         fingerprint = digest([window, local, args])
         identifier = digest([turn_id, fingerprint])
         if self.config.get('source_gateway_enabled') and local in WRITES:

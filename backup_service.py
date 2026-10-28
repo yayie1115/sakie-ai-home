@@ -408,6 +408,11 @@ def _repair_orphaned_messages(tables):
 
 def _check_memory_source_restore(db):
     """A legacy ZIP is not an external-source ledger recovery protocol."""
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='morrow_context_control'").fetchone():
+        state=db.execute('SELECT enabled FROM morrow_context_control WHERE id=1').fetchone()
+        # Legacy table export cannot preserve provenance or prevent ID reuse.
+        if not state or state[0] or db.execute('SELECT 1 FROM morrow_context_manifests LIMIT 1').fetchone():
+            raise BackupError('此数据库包含上下文来源记录，普通 ZIP 不能覆盖恢复；请使用完整联合快照核对。')
     present = {row[0] for row in db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('memory_bridge_control','memory_bridge_outbox')")}
     if not present:

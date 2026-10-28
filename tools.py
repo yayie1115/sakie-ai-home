@@ -29,6 +29,7 @@ from datetime import datetime, timedelta
 
 import requests
 import mcp_client
+import context_provenance
 import music_service
 
 DB_PATH = os.environ.get("DB_PATH", os.path.join("data", "nook.db"))
@@ -38,7 +39,7 @@ QWEATHER_KEY = os.environ.get("QWEATHER_KEY", "")
 
 
 def _connect():
-    conn = sqlite3.connect(DB_PATH)
+    conn = context_provenance.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn

@@ -194,6 +194,14 @@ bridge-derived records remain, and never overwrite newer chat with an old DB.
 
 ## Security notes
 
+The optional host context provenance and joint encrypted recovery candidates
+remain opt-in and are **not** a production raw-sync release certification.
+Normal startup does not install or enable their host schema. See the
+[context and recovery handoff](docs/reviews/MORROW-SEREIN-CONTEXT-CLOSURE-20261028.md)
+for coverage, offline test commands, required backup inputs, and the remaining
+receiver/write-path gates. Never enable capture or clear recall quarantine
+merely because an isolated snapshot restores successfully.
+
 - Never commit `.env`, `data/`, exports, or backups.
 - Put Morrow behind HTTPS before exposing it outside a trusted network.
 - Use a unique login password and session secret.
