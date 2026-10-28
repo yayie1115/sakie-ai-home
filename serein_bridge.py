@@ -280,12 +280,12 @@ class Bridge:
                 raise ValueError('Recall response exceeds budget')
             # A direct question about the user's preferences/history is an
             # intentional lookup, even when the upstream Hook's chat router
-            # skips it. Use Serein's existing bounded read API, not a host cache
+            # skips it or produces no surface-eligible note. Use Serein's
+            # existing bounded read API, not a host cache
             # or a lowered relevance threshold. Guarded source mode stays intact.
-            route=result.get('debug',{}).get('semantic_recall_debug',{}).get('route_action')
             personal=re.search(r'我(?:的|最|喜欢|爱|偏好|叫|是|住|工作|生日|约定)|你还?记得|之前|上次|约定|偏好|记忆',query)
             question=re.search(r'[?？]|什么|哪[个些]|多少|是否|记得',query)
-            if (not ids and not context and route=='skip' and personal and question
+            if (not ids and not context and personal and question
                     and self.config.get('auto_text_memory_enabled')
                     and not self.config.get('source_gateway_enabled') and not self.config.get('raw_sync_enabled')):
                 try:

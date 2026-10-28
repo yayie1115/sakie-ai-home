@@ -46,7 +46,7 @@ Chat only enqueues work; first entry into another conversation may wait up to
 `auto_text_recall_wait` seconds (capped at 8) for a recent pending save. Other
 turns do not wait. Unconfirmed writes must not be described as already saved.
 
-When Hook classifies a direct personal-memory question as chitchat and skips it,
+When Hook returns no note for a direct personal-memory question,
 the host can use Serein's existing semantic `recall_memory` lookup (two notes,
 2-second timeout). Visibility and relevance remain controlled by Serein;
 empty or unavailable lookups never claim a hit or prevent ordinary chat.

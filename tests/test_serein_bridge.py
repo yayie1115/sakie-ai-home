@@ -11,6 +11,15 @@ from aru_import import parse_markdown
 
 
 class BridgeTests(unittest.TestCase):
+    def test_auto_memory_empty_recall_route_also_uses_lookup(self):
+        self.client.config['auto_text_memory_enabled']=True
+        self.transport.post.return_value.json.return_value={'ok':True,'recalled_ids':[],
+            'additional_context':'','debug':{'semantic_recall_debug':{'route_action':'recall'}}}
+        self.mcp.call_tool.return_value=('[typed_memory ref=scene:synthetic]\n虚构水果偏好\n[/typed_memory]','http')
+        result=self.client.prepare('window','receipt','我喜欢什么水果？')
+        self.assertEqual(result['ids'],['scene:synthetic'])
+        self.assertIn('虚构水果偏好',result['context'])
+
     def test_auto_memory_personal_question_uses_existing_lookup_after_hook_skip(self):
         self.client.config['auto_text_memory_enabled']=True
         self.transport.post.return_value.json.return_value={'ok':True,'recalled_ids':[],
