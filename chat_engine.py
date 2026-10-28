@@ -1166,7 +1166,7 @@ def stream_chat(session_id, model=None, think=False, exclude_id=None, provider_i
                 return result if result is not None else (prior_executor(name, args, sid) if prior_executor else None)
 
             extra_executor = bridge_executor
-            if bridge.config.get('replace_legacy'):
+            if bridge.config.get('replace_legacy') or bridge.config.get('prefer_scene_writes'):
                 base_tools = [item for item in base_tools
                               if item.get('function', {}).get('name') not in serein_bridge.LEGACY_TOOLS]
         if bridge_turn.get('context'):

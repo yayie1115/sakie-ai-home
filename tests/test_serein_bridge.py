@@ -194,6 +194,30 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(result['error'],'source_context_incomplete')
         self.mcp.call_tool.assert_not_called()
 
+    def test_basic_scene_writes_preserve_legacy_read_context_and_other_tools(self):
+        import chat_engine
+        self.client.config['prefer_scene_writes']=True
+        self.client.config['replace_legacy']=False
+        seen={}
+        def generated(*args,**kwargs):
+            seen['system']=args[3];seen['tools']=kwargs['base_tool_definitions']
+            seen['extra']=kwargs['extra_tools']
+            yield 'delta','synthetic answer'
+        with patch.object(bridge,'for_chat',return_value=self.client), \
+             patch.object(bridge,'suppress_legacy',return_value=False), \
+             patch.object(chat_engine,'get_provider',return_value={'base_url':'http://example.test/v1',
+                 'api_key':'synthetic-only','format':'openai','id':1,'name':'synthetic'}), \
+             patch.object(chat_engine,'latest_user_text',return_value='synthetic question'), \
+             patch.object(chat_engine,'build_system_sections',return_value={'stable':'existing persona and legacy memory','volatile':''}), \
+             patch.object(chat_engine,'get_conversation_summary',return_value=''), \
+             patch.object(chat_engine,'get_history',return_value=[]), \
+             patch.object(chat_engine.tools,'openai_tools',return_value=[{'function':{'name':'write_memory'}},{'function':{'name':'read_note'}}]), \
+             patch.object(chat_engine,'_run_openai_tool_loop',side_effect=generated):
+            list(chat_engine.stream_chat(1,model='synthetic',current_user_message_id=8))
+        self.assertIn('existing persona and legacy memory',seen['system'])
+        self.assertEqual([item['function']['name'] for item in seen['tools']],['read_note'])
+        self.assertTrue(any(item['function']['name']=='serein_write_scene' for item in seen['extra']))
+
     def test_bound_gateway_timeout_does_not_blindly_repeat_write(self):
         self.client.config['source_gateway_enabled']=True
         context={'instance_id':'synthetic','session_id':1,'sources':[],'epoch':0}

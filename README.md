@@ -23,6 +23,12 @@ Future development should build on Morrow's existing Flask/SQLite and tool bound
 
 The optional `serein_bridge.py` adapter keeps model calls and persona configuration in Morrow. It uses an explicitly configured loopback Serein instance, a restricted MCP tool allowlist, and a private sidecar ledger for successful recall deliveries and non-idempotent write outcomes. Missing configuration or a recall outage leaves normal chat usable. `deploy/morrow-serein.example.json` has safe defaults; no credential is included. Setting `MORROW_SEREIN_CONFIG` selects a private configuration file. Do not enable `hook_ready` before embedding, reranking and routes have been tested. `replace_legacy` suppresses old automatic memory injection and normal-chat memory write tools without deleting stored memories; background activity integration is not included.
 
+For basic ordinary-chat memory, `prefer_scene_writes=true` routes the model's
+new memory writes to the existing Serein Scene tools while retaining old Morrow
+memory reads (`replace_legacy=false`). It does not enable raw synchronization,
+source certification, or automatic Events. Scenes without source bindings
+remain explicitly unbound; the model decides when to call the memory tools.
+
 Raw transcript automatic synchronization is **not enabled**: the pinned Serein source lacks a verified source-edit/version/withdrawal transport. The durable outbox can detect identity/content conflicts but its sender is intentionally blocked, even if a configuration flag is changed. Scene reads/writes and host acknowledgements do not imply transcript synchronization or automatic Event generation. Unknown Scene write outcomes remain blocked across process restarts; inspect them before retrying. This guard does not provide cross-service exactly-once writes.
 
 `aru_import.py` is a pure preview converter for explicitly mapped, timezone-aware Aru-like Markdown. It never imports to a database or fetches attachments; actual Aru exports still need format verification. Retain original export bytes privately.

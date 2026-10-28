@@ -8,6 +8,7 @@
   "hook_ready": false,
   "tools_enabled": false,
   "replace_legacy": false,
+  "prefer_scene_writes": false,
   "raw_sync_enabled": false,
   "source_gateway_enabled": false,
   "recall_timeout": 2
