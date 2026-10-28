@@ -142,10 +142,21 @@ class AutoTextTest(unittest.TestCase):
         elapsed=auto.wait_for_recent_other_session(self.path,self.bridge,2,2)
         self.assertGreaterEqual(elapsed,50);self.assertLess(elapsed,500)
 
-    def test_fixture_session_is_labeled_without_changing_semantic_input(self):
+    def test_title_is_not_evidence_that_a_user_statement_is_fiction(self):
         self.db.executescript("CREATE TABLE sessions(id INTEGER PRIMARY KEY,title TEXT);INSERT INTO sessions VALUES(1,'【虚构验收】自然偏好');")
         self.enqueue();self.process()
-        self.assertIn('虚构验收资料',self.mcp.call_tool.call_args.args[2]['content'])
+        self.assertNotIn('虚构验收资料',self.mcp.call_tool.call_args.args[2]['content'])
+        self.assertIn(self.candidate['quote'],self.mcp.call_tool.call_args.args[2]['content'])
+
+    def test_title_change_keeps_source_hash_job_identity_and_extraction_input(self):
+        self.db.executescript("CREATE TABLE sessions(id INTEGER PRIMARY KEY,title TEXT);INSERT INTO sessions VALUES(1,'普通标题');")
+        first=auto.source(self.path,1,1);job=self.enqueue()
+        with self.db:self.db.execute("UPDATE sessions SET title='【虚构验收】另一个标题'")
+        second=auto.source(self.path,1,1)
+        self.assertEqual(first,second);self.assertEqual(job,self.enqueue())
+        extractor=Mock(return_value=self.candidate);self.process(extractor)
+        self.assertEqual(extractor.call_args.args[2],first['content'])
+        with self.bridge.ledger.connect() as db:self.assertEqual(db.execute('SELECT count(*) FROM auto_text_jobs').fetchone()[0],1)
 
 
 if __name__=='__main__':unittest.main()

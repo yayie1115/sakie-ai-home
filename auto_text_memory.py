@@ -59,11 +59,11 @@ def source(path,sid,mid):
             if not row or row[0]:return None
         row=db.execute("SELECT content,active,attachments,hidden,created_at FROM messages WHERE id=? AND session_id=? AND role='user'",(mid,sid)).fetchone()
         if not row or row['hidden'] or json.loads(row['attachments'] or '[]'):return None
-        value=dict(row);value['synthetic']=False
-        if db.execute("SELECT 1 FROM sqlite_master WHERE name='sessions'").fetchone():
-            session=db.execute('SELECT title FROM sessions WHERE id=?',(sid,)).fetchone()
-            value['synthetic']=bool(session and str(session[0]).startswith('【虚构验收】'))
-        value['hash']=serein_bridge.digest([sid,mid,value['active'],value['content'],value['synthetic']])
+        # Titles are navigation metadata, never evidence of reality/fiction.
+        # Keep the previous non-fixture hash shape so existing normal jobs and
+        # idempotent receipts remain compatible. Tests belong in isolated stores.
+        value=dict(row)
+        value['hash']=serein_bridge.digest([sid,mid,value['active'],value['content'],False])
         return value
 
 
@@ -170,8 +170,7 @@ def run_one(path,bridge,*,extractor=extract,now=None):
         current=source(path,job['session_id'],job['message_id'])
         if not current or current['hash']!=job['source_hash']:finish('skipped','source_changed');return True
         args={'title':{'preference':'自动记忆 · 偏好','profile':'自动记忆 · 个人信息','commitment':'自动记忆 · 约定'}[candidate['kind']],
-              'content':('【虚构验收资料，不代表真实用户偏好】\n' if row['synthetic'] else '')+
-                        '用户于 '+row['created_at']+' 表达：'+candidate['memory']+'\n用户原句摘录：'+candidate['quote']+
+              'content':'用户于 '+row['created_at']+' 表达：'+candidate['memory']+'\n用户原句摘录：'+candidate['quote']+
                         '\n这是当时的自述记录；保留既有记录，不自动覆盖其他时期的表达。',
               'cues':candidate['cues'],'date':row['created_at'][:10]}
         started=time.perf_counter()
