@@ -135,6 +135,7 @@ class Trace:
                        (str(session_id),stamp)).fetchone()
         if not row or not valid_manifest(db,row[0],allow_unknown=True):
             self.opaque('previous_summary_without_verified_dependencies');return
+        self.inputs[-1]['manifest']=row[0]
         payload=json.loads(db.execute('SELECT payload FROM morrow_context_manifests WHERE id=?',(row[0],)).fetchone()[0])
         self.unknown.update(payload['unknown'])
         for dep in payload['dependencies']:
@@ -337,6 +338,17 @@ def initialize(db):
             quarantine=(f'''INSERT OR IGNORE INTO morrow_context_quarantine SELECT {sid} WHERE {sid} IS NOT NULL
                 AND (morrow_context_id() IS NULL OR EXISTS(SELECT 1 FROM morrow_context_dependencies
                      WHERE manifest=morrow_context_id() AND kind='message' AND object_key=CAST(OLD.id AS TEXT)));''') if table=='messages' else ''
+            if table=='conversation_summaries':
+                quarantine='INSERT OR IGNORE INTO morrow_context_quarantine VALUES(OLD.session_id);'
+            elif table=='memory_entries' and 'sessions' in tables:
+                # Legacy caches have no trustworthy per-memory dependency map.
+                # Preserve them for the owner, but do not reuse unknown derived
+                # text as model input after an independently corrected memory.
+                quarantine='INSERT OR IGNORE INTO morrow_context_quarantine SELECT id FROM sessions;'
+            if table in ('memory_entries','conversation_summaries') and 'memory_bridge_control' in tables:
+                # Until these object revisions have their own ordered receiver
+                # withdrawal receipt, do not reuse external recall after edits.
+                quarantine+='UPDATE memory_bridge_control SET recall_blocked=1 WHERE id=1 AND enabled=1;'
             db.execute(f'''CREATE TRIGGER IF NOT EXISTS morrow_context_invalidate_{table}_{action.lower()}
                 AFTER {action} ON {table} WHEN (SELECT enabled FROM morrow_context_control WHERE id=1)=1{changed}
                 BEGIN UPDATE morrow_context_manifests SET state='revoked' WHERE id IN
@@ -363,6 +375,13 @@ def initialize(db):
                 BEFORE {action} ON conversation_summaries WHEN (SELECT enabled FROM morrow_context_control WHERE id=1)=1
                   AND morrow_context_owner()=0 AND morrow_context_current()=0
                 BEGIN SELECT RAISE(ABORT,'summary_context_unverified'); END''')
+            db.execute(f'''CREATE TRIGGER IF NOT EXISTS morrow_context_summary_owner_{action.lower()}
+                AFTER {action} ON conversation_summaries WHEN (SELECT enabled FROM morrow_context_control WHERE id=1)=1
+                  AND morrow_context_owner()=1
+                BEGIN INSERT OR REPLACE INTO morrow_context_derivations VALUES('summary',CAST(NEW.session_id AS TEXT),
+                  morrow_context_hash(json_object('session_id',NEW.session_id,'summary',NEW.summary,
+                    'covered_through_message_id',NEW.covered_through_message_id,'raw_overlap_count',NEW.raw_overlap_count)),
+                  NULL,'owner'); END''')
     # Every memory-table writer, including an unsupported CLI, is mediated at
     # the database boundary. Registered unknown/background writers fail closed.
     if 'memory_entries' in tables:

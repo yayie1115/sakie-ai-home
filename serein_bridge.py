@@ -295,14 +295,23 @@ class Bridge:
             return outcome
         if 'evidence_refs' in args:
             return {**outcome, 'error': 'unverified_evidence', 'content': '尚未启用来源绑定，不能添加未经核实的原话证据。'}
-        # Opt-in host manifests do not yet constitute a receiver-authenticated
-        # context receipt. Never downgrade a guarded turn to unbound native MCP.
+        # Never downgrade a guarded turn to unbound native MCP. Local complete
+        # only permits requesting receiver verification, not claiming success.
         import context_provenance
         if local in WRITES and context_provenance.active() is not None:
-            return {**outcome, 'error': 'context_receipt_unverified',
-                    'content': '完整上下文来源尚未通过双端核验，本次未保存记忆。'}
+            if not self.config.get('source_gateway_enabled') or not host_context or not host_context.get('context_graph'):
+                return {**outcome, 'error': 'context_receipt_unverified',
+                        'content': '完整上下文来源尚未通过双端核验，本次未保存记忆。'}
         fingerprint = digest([window, local, args])
         identifier = digest([turn_id, fingerprint])
+        graph_scope=(host_context or {}).get('context_graph')
+        if graph_scope is not None:
+            # A regenerated Trace UUID is not a new operation, but a changed
+            # effective source/version/epoch must not reuse an old success.
+            semantic_scope=sorted([[obj['kind'],obj['key'],obj['hash'],obj.get('source')]
+                                   for obj in graph_scope['objects']],key=lambda row:(row[0],row[1]))
+            identifier=digest([turn_id,fingerprint,graph_scope['instance_id'],graph_scope['session_id'],
+                               graph_scope['epoch'],semantic_scope])
         if self.config.get('source_gateway_enabled') and local in WRITES:
             if not host_context:
                 return {**outcome,'error':'source_context_incomplete',
@@ -310,9 +319,14 @@ class Bridge:
             try:
                 previous=self.ledger.begin(identifier,fingerprint)
                 if previous is not None:return previous
+                request=dict(host_context)
+                graph=request.pop('context_graph',None)
+                if graph is not None:
+                    import context_binding
+                    request['context_certificate']=context_binding.sign(graph,self.token,identifier,local,args)
                 response=self.transport.post(self.base+'/bridge/scene',
                     headers={'Authorization':'Bearer '+self.token},
-                    json={**host_context,'operation_id':identifier,'tool':local,'arguments':args},
+                    json={**request,'operation_id':identifier,'tool':local,'arguments':args},
                     timeout=(.5,8),allow_redirects=False)
                 if response.status_code in (400,401,403,409,503) and response.json().get('error') in {
                         'source_conflict_review_required','invalid_source_request','source_instance_mismatch',
@@ -323,6 +337,22 @@ class Bridge:
                     return result
                 response.raise_for_status();saved=response.json()
                 if saved.get('ok') is not True or not isinstance(saved.get('id'),str):raise ValueError()
+                if graph is not None:
+                    from source_protocol import fingerprint as context_fingerprint
+                    expected={'version':context_binding.VERSION,
+                              'digest':context_fingerprint(request['context_certificate']['payload']),
+                              'epoch':host_context['epoch']}
+                    if saved.get('context_verification')!=expected:raise ValueError('Receiver context receipt missing')
+                    trace=context_provenance.active()
+                    if trace is None or trace.identifier!=graph['root']:raise ValueError('Host context changed')
+                    from contextlib import closing
+                    with closing(context_provenance.connect(trace.path)) as host:
+                        host.execute('BEGIN')
+                        control=host.execute('SELECT enabled,recall_blocked FROM memory_bridge_control WHERE id=1').fetchone()
+                        if not control or not control[0] or control[1] or not context_provenance.valid_manifest(host,trace.identifier):
+                            # Receiver may already have committed. Preserve the
+                            # UNKNOWN operation; never report success or retry.
+                            raise ValueError('Host context revoked during receiver commit')
                 result={**outcome,'ok':True,'content':saved['content'],'error':''}
                 self.ledger.complete(identifier,result)
                 return result

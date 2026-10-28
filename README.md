@@ -202,6 +202,11 @@ for coverage, offline test commands, required backup inputs, and the remaining
 receiver/write-path gates. Never enable capture or clear recall quarantine
 merely because an isolated snapshot restores successfully.
 
+The [receiver binding continuation](docs/reviews/MORROW-SEREIN-RECEIVER-BINDING-20261028.md)
+documents the host-signed graph path, actual receiver-process checks, precise
+file backup inputs, and `controlled_snapshot` maintenance audit. Per-operation
+context receipts do not certify production raw sync or automatic Events.
+
 - Never commit `.env`, `data/`, exports, or backups.
 - Put Morrow behind HTTPS before exposing it outside a trusted network.
 - Use a unique login password and session secret.

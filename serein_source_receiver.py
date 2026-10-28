@@ -66,12 +66,13 @@ def trusted_sources(db, instance, session, refs):
     return result
 
 
-def author_scene(settings, body):
+def author_scene(settings, body, *, host_key=None, require_context=False):
     from serein.core.writer import Writer
     from serein.core.store import now, encode
     from serein.compat.scenes import Scenes, map_evidence_ids
     from serein.deployment import read_from_store
-    if (not isinstance(body,dict) or set(body) != {'instance_id','session_id','operation_id','tool','arguments','sources','epoch'}
+    base={'instance_id','session_id','operation_id','tool','arguments','sources','epoch'}
+    if (not isinstance(body,dict) or set(body) not in (base,base|{'context_certificate'})
             or type(body['session_id']) is not int or type(body['epoch']) is not int
             or not isinstance(body['operation_id'],str) or not 1<=len(body['operation_id'])<=128):
         raise SourceConflict('Invalid host authoring request')
@@ -86,7 +87,15 @@ def author_scene(settings, body):
         db=writer.store.conn
         if guard.epoch(db)!=body['epoch']:
             raise SourceConflict('Host authoring context epoch has expired')
-        resolved=trusted_sources(db,body['instance_id'],body['session_id'],body['sources'])
+        certificate=body.get('context_certificate')
+        context_hash=None
+        if certificate is not None:
+            if not host_key or body['sources']!=[]:raise SourceConflict('Authenticated complete context required')
+            import context_binding
+            resolved,context_hash=context_binding.verify(db,certificate,host_key,body,trusted_sources)
+        else:
+            if require_context:raise SourceConflict('Complete context certificate required')
+            resolved=trusted_sources(db,body['instance_id'],body['session_id'],body['sources'])
         def prepare(_):
             if tool=='write_scene':
                 content=args.get('content','')
@@ -127,6 +136,26 @@ def author_scene(settings, body):
         action='state' if tool=='set_scene_status' else 'save'
         result=writer.execute('morrow-host:'+body['operation_id'],action,body,prepare=prepare)
         key=result['id']
+        if context_hash:
+            value=certificate['payload']
+            nodes={node['id']:node for node in value['nodes']}
+            def context_id(identifier):
+                return 'morrow-context:'+body['instance_id']+':'+nodes[identifier]['digest']
+            root_node=context_id(value['root'])
+            db.execute('INSERT OR IGNORE INTO morrow_host_context_receipts VALUES (?,?,?,?)',
+                       (body['operation_id'],context_hash,root_node,body['epoch']))
+            db.execute('INSERT OR IGNORE INTO morrow_document_dependencies VALUES (?,?)',(key,root_node))
+            for node in value['nodes']:
+                current=context_id(node['id'])
+                for dep in node['payload']['dependencies']:
+                    if dep.get('manifest'):
+                        db.execute('INSERT OR IGNORE INTO morrow_document_dependencies VALUES (?,?)',(current,context_id(dep['manifest'])))
+                for prior in node['payload'].get('inputs',[]):
+                    db.execute('INSERT OR IGNORE INTO morrow_document_dependencies VALUES (?,?)',(current,context_id(prior['manifest'])))
+                # All resolved leaves are conservative dependencies. This is
+                # lineage, not a claim that a subjective Scene quotes a fact.
+                for ref in resolved:
+                    db.execute('INSERT OR IGNORE INTO morrow_context_source_dependencies VALUES (?,?)',(current,ref['source_key']))
         if not (tool=='set_scene_status' and args.get('status')=='deleted'):
             for ref in resolved:
                 source=writer.store.add_source(ref['source_key'],ref['content'],metadata=ref['metadata'])
@@ -135,8 +164,11 @@ def author_scene(settings, body):
                 if old is None or not old['active'] or json.loads(old['metadata_json'])!=ref['metadata']:
                     writer.store.bind(key,source,metadata=ref['metadata'],actor='morrow_host_context')
         map_evidence_ids(writer.store,[key])
-        return {'ok':True,'id':key,'revision':result['revision'],'status':result['status'],
-                'content':'记忆操作已保存。\n[scene_id:'+key+']\n[evidence_scope:host_context_dependency]'}
+        response={'ok':True,'id':key,'revision':result['revision'],'status':result['status'],
+                  'content':'记忆操作已保存。\n[scene_id:'+key+']\n[evidence_scope:host_context_dependency]'}
+        if context_hash:
+            response['context_verification']={'version':'morrow-context-binding-v1','digest':context_hash,'epoch':body['epoch']}
+        return response
 
 
 def register(app, settings, projector, token, policy_path):
@@ -175,7 +207,7 @@ def register(app, settings, projector, token, policy_path):
                 head=await run_in_threadpool(projector.head,p['instance_id'])
                 return {**head,'epoch':guard.current(settings.database)}
             if operation=='events':return await run_in_threadpool(projector.apply,body)
-            if operation=='scene':return await run_in_threadpool(author_scene,settings,body)
+            if operation=='scene':return await run_in_threadpool(author_scene,settings,body,host_key=token,require_context=True)
             raise ValueError()
         except SourceConflict:
             return JSONResponse({'error':'source_conflict_review_required'},status_code=409)

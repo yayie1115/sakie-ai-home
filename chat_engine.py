@@ -1158,8 +1158,8 @@ def stream_chat(session_id, model=None, think=False, exclude_id=None, provider_i
                 context=host_source_context
                 if context is not None:
                     import memory_outbox
-                    context=memory_outbox.source_context(DB_PATH,session_id,host_sources,context['epoch'])
-                if bridge.config.get('source_gateway_enabled') and context is None and name.startswith('serein_'):
+                    context=memory_outbox.source_context(DB_PATH,session_id,host_sources,context['epoch'],trace=context_provenance.active())
+                if bridge.config.get('source_gateway_enabled') and context is None and name.removeprefix('serein_') in serein_bridge.WRITES:
                     return {'ok':False,'content':'记忆来源正在核对，本次不读取或写入外部记忆。',
                             'error':'source_context_incomplete','duration_ms':0,'source':'mcp','server':'Serein'}
                 result = bridge.execute(name, args, window, receipt, host_context=context)
@@ -1212,14 +1212,14 @@ def stream_chat(session_id, model=None, think=False, exclude_id=None, provider_i
         source_records=host_sources if bridge and bridge.config.get('source_gateway_enabled') else None,
     )
     if bridge and bridge.config.get('source_gateway_enabled'):
-        # Existing summaries, recall cards, attachments and replayed tool output
-        # do not yet carry a complete dependency manifest. Do not attach a few
-        # recent messages and misrepresent them as coverage of the entire input.
-        if not conversation_summary and not bridge_turn.get('context') and not any(
-                row.get('tool_calls') or row.get('role')=='tool' or not isinstance(row.get('content'),str) for row in history):
+        # The new path verifies the complete host graph, including proven
+        # summaries. Unknown recall/media/tool inputs remain unknown and fail
+        # export. Legacy callers never gain authority from recent rows alone.
+        if context_provenance.active() is not None or (not conversation_summary and not bridge_turn.get('context') and not any(
+                row.get('tool_calls') or row.get('role')=='tool' or not isinstance(row.get('content'),str) for row in history)):
             import memory_outbox
             host_source_context=memory_outbox.source_context(DB_PATH,session_id,host_sources,
-                                                            bridge_turn.get('source_epoch'))
+                                                            bridge_turn.get('source_epoch'),trace=context_provenance.active())
     tool_history = (
         get_history(
             session_id,

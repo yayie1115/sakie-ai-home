@@ -1794,6 +1794,14 @@ def execute(name, args, session_id=None):
             error = "这个 MCP 工具不存在或已停用。"
             return {"ok": False, "content": f"（{error}）", "error": error, "duration_ms": 0,
                     "source": "mcp", "server": "" , "tool": name}
+        if context_provenance.active() is not None:
+            # Generic MCP has no host-context transaction contract. Do not let
+            # another registration of the same memory tool bypass the Bridge.
+            # This opt-in mode stays closed until external read receipts and
+            # explicitly approved side-effect boundaries have been integrated.
+            return {"ok": False, "content": "此扩展尚未通过本回合来源核验，未调用外部工具。",
+                    "error": "external_tool_context_unverified", "duration_ms": 0,
+                    "source": "mcp", "server": server["name"], "tool": tool["name"]}
         try:
             content, _transport = mcp_client.call_tool(
                 server["url"], tool["name"], args or {}, access_token=server["access_token"]

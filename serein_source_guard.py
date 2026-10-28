@@ -88,6 +88,8 @@ def initialize(db):
         'CREATE TABLE IF NOT EXISTS morrow_revoked_documents(id TEXT PRIMARY KEY,event_id TEXT NOT NULL)',
         'CREATE TABLE IF NOT EXISTS morrow_derived_vault(kind TEXT,id TEXT,event_id TEXT,payload TEXT,PRIMARY KEY(kind,id,event_id))',
         'CREATE TABLE IF NOT EXISTS morrow_document_dependencies(document_id TEXT,depends_on TEXT,PRIMARY KEY(document_id,depends_on))',
+        'CREATE TABLE IF NOT EXISTS morrow_context_source_dependencies(context_id TEXT,source_key TEXT,PRIMARY KEY(context_id,source_key))',
+        'CREATE TABLE IF NOT EXISTS morrow_host_context_receipts(operation TEXT PRIMARY KEY,context_hash TEXT,root_node TEXT,epoch INTEGER)',
     ]
     for sql in statements:
         db.execute(sql)
@@ -163,6 +165,7 @@ def invalidate(store, rows, event_id):
                      encode([row['source'],row['session_id'],str(row['id'])])))
     affected = set()
     for key in keys:
+        affected.update(r[0] for r in db.execute('SELECT context_id FROM morrow_context_source_dependencies WHERE source_key=?',(key,)))
         db.execute('INSERT OR IGNORE INTO morrow_revoked_sources VALUES (?,?)', (key,event_id))
         affected.update(r[0] for r in db.execute('''SELECT b.document_id FROM evidence_bindings b
             JOIN sources s ON s.id=b.source_id WHERE s.source_key=?''', (key,)))

@@ -12,6 +12,10 @@ from pathlib import Path
 import shutil
 import sqlite3
 import tempfile
+import tarfile
+from uuid import uuid4
+import re
+import subprocess
 
 import memory_outbox
 import serein_backup
@@ -23,6 +27,85 @@ def sha(path):
     with open(path,'rb') as handle:
         for chunk in iter(lambda:handle.read(1024*1024),b''):value.update(chunk)
     return value.hexdigest()
+
+
+def _unit_status(unit):
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.@-]*\.(service|timer)',unit):raise ValueError('Invalid maintenance unit')
+    result=subprocess.run(['systemctl','show',unit,'--property=ActiveState,SubState,MainPID,InvocationID'],
+                          check=True,capture_output=True,text=True,timeout=5)
+    return dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+
+
+def _open_holders(paths):
+    """Read-only Linux descriptor audit. Unreadable processes are blockers."""
+    if not Path('/proc').is_dir():return [],1
+    wanted={str(Path(path).resolve()) for path in paths};holders=[];unreadable=0
+    for process in Path('/proc').iterdir():
+        if not process.name.isdigit() or int(process.name)==os.getpid():continue
+        try:
+            for descriptor in (process/'fd').iterdir():
+                try:
+                    target=os.readlink(descriptor)
+                    if target in wanted or target.removesuffix(' (deleted)') in wanted:
+                        holders.append(int(process.name));break
+                except FileNotFoundError:continue
+        except FileNotFoundError:continue
+        except PermissionError:unreadable+=1
+    return sorted(holders),unreadable
+
+
+def maintenance_status(databases,units):
+    """Inspect an explicit writer inventory; never stops or restarts a service.
+
+    Unknown jobs, inaccessible /proc, active timers, and open external database
+    handles fail closed. Unit completeness and media writers still require
+    operator review; this is not a global source-release certificate.
+    """
+    if not units:raise ValueError('Explicit writer service/timer inventory required')
+    paths={name:Path(path).resolve(strict=True) for name,path in databases.items()}
+    states={unit:_unit_status(unit) for unit in sorted(set(units))}
+    blockers=[]
+    for unit,state in states.items():
+        if state.get('ActiveState')!='inactive' or state.get('SubState')!='dead' or state.get('MainPID','0')!='0':
+            blockers.append('unit_not_quiescent:'+unit)
+    checks={'host':[
+        ('night_runs',"status IN ('queued','running')"),('proactive_message_jobs',"status='running'"),
+        ('image_descriptions',"status='running'"),('sessions',"title_state='generating'")],
+        'receiver':[('pipeline_jobs',"output_json IS NULL AND NOT EXISTS(SELECT 1 FROM pipeline_batches b "
+                    "WHERE b.id=pipeline_jobs.batch_id AND (b.status='done' OR b.status LIKE 'superseded_%'))"),
+                    ('pipeline_batches',"status!='done' AND status NOT LIKE 'superseded_%'")]}
+    jobs={}
+    for component,queries in checks.items():
+        if component not in paths:blockers.append('missing_component:'+component);continue
+        with closing(sqlite3.connect(paths[component].as_uri()+'?mode=ro',uri=True)) as db:
+            for table,condition in queries:
+                try:
+                    count=db.execute('SELECT count(*) FROM '+table+' WHERE '+condition).fetchone()[0]
+                    jobs[component+':'+table]=count
+                    if count:blockers.append('unfinished_jobs:'+component+':'+table)
+                except sqlite3.Error:blockers.append('unknown_jobs:'+component+':'+table)
+    holders,unreadable=_open_holders(paths.values())
+    if holders:blockers.append('external_database_handles')
+    if unreadable:blockers.append('unreadable_process_descriptors')
+    identities={name:{'path':str(path),'device':path.stat().st_dev,'inode':path.stat().st_ino} for name,path in paths.items()}
+    return {'version':'morrow-maintenance-v1','ready':not blockers,'scope':protocol.fingerprint(identities),
+            'units':states,'jobs':jobs,'holders':holders,'unreadable_processes':unreadable,
+            'blockers':blockers,'release_certified':False}
+
+
+def controlled_snapshot(databases,assets,destination,passphrase,*,units):
+    """Production maintenance entry: inspect before AND after frozen copying."""
+    return snapshot(databases,assets,destination,passphrase,writers_quiesced=True,
+                    maintenance_probe=lambda:maintenance_status(databases,units))
+
+
+def resume_review(root,peer_head):
+    """A past snapshot is not permission to replace a newer active instance."""
+    archived=verify_restored(root)
+    same=peer_head==archived['receiver']
+    return {'ready_for_operator_review':same,'release_certified':False,
+            'recall_blocked':archived['recall_blocked'],
+            'reason':'fresh_runtime_and_asset_review_required' if same else 'peer_lineage_differs_stop'}
 
 
 def lineage(host,receiver):
@@ -59,7 +142,9 @@ def lineage(host,receiver):
 
 def tree_files(root):
     root=Path(root)
-    if root.is_symlink() or not root.is_dir():raise ValueError('Invalid asset root')
+    if root.is_symlink():raise ValueError('Invalid asset root')
+    if root.is_file():return {root.name:sha(root)}
+    if not root.is_dir():raise ValueError('Invalid asset root')
     result={}
     for path in sorted(root.rglob('*')):
         if path.is_symlink():raise ValueError('Symlink in backup input')
@@ -98,7 +183,7 @@ def restore(source,target,passphrase):
         return state
 
 
-def snapshot(databases,assets,destination,passphrase,*,writers_quiesced=False):
+def snapshot(databases,assets,destination,passphrase,*,writers_quiesced=False,maintenance_probe=None):
     """No automatic service stop, credential discovery, or live recovery.
 
     Explicit databases must include host, receiver, and index. Assets must
@@ -106,6 +191,8 @@ def snapshot(databases,assets,destination,passphrase,*,writers_quiesced=False):
     selecting these inputs is an operator responsibility, not auto-discovery.
     """
     if not writers_quiesced:raise ValueError('Non-database writers must be quiesced')
+    audit=maintenance_probe() if maintenance_probe else None
+    if audit is not None and audit.get('ready') is not True:raise ValueError('Maintenance audit blocked snapshot')
     if not {'host','receiver','index'}<=set(databases):raise ValueError('Required component missing')
     if not assets:raise ValueError('Configuration/identity coverage must be declared')
     if any(not name.isidentifier() for name in [*databases,*assets]):raise ValueError('Invalid component label')
@@ -130,13 +217,18 @@ def snapshot(databases,assets,destination,passphrase,*,writers_quiesced=False):
                     with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as reader, \
                          closing(sqlite3.connect(staged/'databases'/(name+'.db'))) as target:
                         reader.backup(target)
+                        # Normalize ONLY the new frozen copy. A copied WAL-mode
+                        # header otherwise creates fresh -wal/-shm during read
+                        # verification, outside the authenticated inventory.
+                        if target.execute('PRAGMA journal_mode=DELETE').fetchone()[0]!='delete':
+                            raise ValueError('Snapshot journal normalization failed')
                 inventories={}
                 for name,root in assets.items():
                     root=Path(root)
                     if destination.resolve().is_relative_to(root.resolve()):raise ValueError('Destination inside input')
                     inventories[name]=tree_files(root)
                     for relative,stamp in inventories[name].items():
-                        src=root/relative
+                        src=root if root.is_file() else root/relative
                         # Do not accidentally copy another mutable database as
                         # an ordinary file. All SQLite stores must be declared.
                         with open(src,'rb') as handle:
@@ -152,10 +244,19 @@ def snapshot(databases,assets,destination,passphrase,*,writers_quiesced=False):
                 files={p.relative_to(staged).as_posix():sha(p) for p in staged.rglob('*') if p.is_file()}
                 (staged/'metadata').mkdir(mode=0o700)
                 (staged/'metadata'/'joint.json').write_text(json.dumps({'format':'morrow-joint-v1',
-                    'databases':sorted(paths),'files':files,'lineage':state},sort_keys=True),encoding='utf-8')
+                    'databases':sorted(paths),'files':files,'lineage':state,'maintenance':audit},sort_keys=True),encoding='utf-8')
                 verify_restored(staged)
-                package,checksum=serein_backup.snapshot({p.name:p for p in staged.iterdir()},private/'encrypted',passphrase)
+                # These SQLite files are ALREADY consistent frozen snapshots.
+                # A second SQLite backup may alter header bytes and invalidate
+                # the authenticated inventory even though logical rows match.
+                plain=private/'joint.tar'
+                with tarfile.open(plain,'w') as archive:
+                    for child in sorted(staged.iterdir()):archive.add(child,arcname=child.name)
+                package=private/(uuid4().hex+'.enc')
+                checksum=serein_backup.encrypt_file(plain,package,passphrase)
+                os.chmod(package,0o600)
                 restore(package,private/'round-trip',passphrase)
+                if maintenance_probe and maintenance_probe()!=audit:raise ValueError('Maintenance state changed; snapshot not published')
                 result=destination/package.name
                 if result.exists():raise ValueError('Backup target already exists')
                 package.rename(result)

@@ -63,8 +63,10 @@ class ContextTest(unittest.TestCase):
             self.assertEqual(trace.seal(),trace.identifier)
 
     def test_legacy_summary_is_unknown_not_fabricated(self):
-        with context.owner(),self.db:
+        with self.db:
+            self.db.execute('UPDATE morrow_context_control SET enabled=0')
             self.db.execute("INSERT INTO conversation_summaries VALUES(1,'Legacy',1,0)")
+            self.db.execute('UPDATE morrow_context_control SET enabled=1')
         with context.generation(self.path,1) as trace:
             trace.record(self.db,'summary',1);trace.seal()
             self.assertFalse(context.valid_manifest(self.db,trace.identifier))
@@ -241,6 +243,16 @@ with c.connect(sys.argv[1]) as db:
         self.db.execute("UPDATE messages SET content='Correction' WHERE id=1");self.db.commit()
         with patch.object(chat_engine,'DB_PATH',str(self.path)):
             self.assertEqual(len(chat_engine.get_history(1,limit=None)),1)
+
+    def test_owner_summary_correction_quarantines_unknown_legacy_reply(self):
+        with self.db:
+            self.db.execute("INSERT INTO messages(id,session_id,role,content) VALUES(2,1,'assistant','Legacy derived text')")
+        with context.owner(),self.db:
+            self.db.execute("INSERT INTO conversation_summaries VALUES(1,'First owner summary',1,0)")
+            self.db.execute("UPDATE conversation_summaries SET summary='Corrected owner assertion'")
+        self.assertFalse(context.readable(self.db,'message',2))
+        self.assertTrue(context.readable(self.db,'summary',1))
+        self.assertEqual(self.db.execute('SELECT count(*) FROM messages').fetchone()[0],2)
 
 
 if __name__=='__main__':unittest.main()

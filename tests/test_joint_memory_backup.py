@@ -156,10 +156,27 @@ host.close();remote.close()
         with self.assertRaises(Exception):joint.restore(damaged,self.root/'corrupt',self.password)
         self.assertFalse((self.root/'corrupt').exists())
 
-    def test_filtered_asset_cannot_silently_disappear_from_joint_manifest(self):
+    def test_declared_asset_cannot_silently_disappear_from_joint_manifest(self):
         (self.assets/'required.log').write_text('Synthetic declared asset')
-        with self.assertRaisesRegex(ValueError,'inventory/hash mismatch'):self.backup()
-        self.assertEqual(list(self.destination.iterdir()),[])
+        package,_,_=self.backup()
+        target=self.root/'declared-assets'
+        joint.restore(package,target,self.password)
+        self.assertEqual((target/'assets'/'identity'/'required.log').read_text(),'Synthetic declared asset')
+
+    def test_precise_configuration_file_does_not_copy_adjacent_database(self):
+        config=self.root/'synthetic-config.toml';config.write_text('synthetic=true')
+        package,_,_=joint.snapshot(self.paths,{'config':config},self.destination,self.password,writers_quiesced=True)
+        target=self.root/'precise-config';joint.restore(package,target,self.password)
+        self.assertEqual((target/'assets'/'config'/config.name).read_text(),'synthetic=true')
+        self.assertFalse((target/'assets'/'config'/'host.db').exists())
+
+    def test_wal_database_copy_is_normalized_without_changing_source_mode(self):
+        self.host.execute('PRAGMA journal_mode=WAL')
+        self.add()
+        package,_,_=self.backup();target=self.root/'wal-copy';joint.restore(package,target,self.password)
+        self.assertEqual(self.host.execute('PRAGMA journal_mode').fetchone()[0],'wal')
+        self.assertEqual(list((target/'databases').glob('*-wal')),[])
+        self.assertEqual(list((target/'databases').glob('*-shm')),[])
 
 
 if __name__=='__main__':unittest.main()
