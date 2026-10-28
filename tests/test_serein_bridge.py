@@ -11,6 +11,34 @@ from aru_import import parse_markdown
 
 
 class BridgeTests(unittest.TestCase):
+    def test_auto_memory_personal_question_uses_existing_lookup_after_hook_skip(self):
+        self.client.config['auto_text_memory_enabled']=True
+        self.transport.post.return_value.json.return_value={'ok':True,'recalled_ids':[],
+            'additional_context':'','debug':{'semantic_recall_debug':{'route_action':'skip'}}}
+        self.mcp.call_tool.return_value=('[typed_memory ref=scene:synthetic]\n虚构偏好\n[/typed_memory]','http')
+        result=self.client.prepare('window','receipt','我最喜欢的花是什么？')
+        self.assertEqual(result['ids'],['scene:synthetic'])
+        self.assertIn('虚构偏好',result['context'])
+        self.assertEqual(self.mcp.call_tool.call_args.args[1],'recall_memory')
+        self.assertEqual(self.mcp.call_tool.call_args.args[2]['mode'],'lookup')
+
+    def test_auto_lookup_does_not_run_on_chitchat_or_existing_hook_result(self):
+        self.client.config['auto_text_memory_enabled']=True
+        self.client.prepare('window','receipt','我最喜欢的花是什么？')
+        self.mcp.call_tool.assert_not_called()
+        self.transport.post.return_value.json.return_value={'ok':True,'recalled_ids':[],
+            'additional_context':'','debug':{'semantic_recall_debug':{'route_action':'skip'}}}
+        self.client.prepare('window','receipt','今天阳光很好。')
+        self.mcp.call_tool.assert_not_called()
+
+    def test_auto_lookup_failure_is_empty_and_never_claimed_success(self):
+        self.client.config['auto_text_memory_enabled']=True
+        self.transport.post.return_value.json.return_value={'ok':True,'recalled_ids':[],
+            'additional_context':'','debug':{'semantic_recall_debug':{'route_action':'skip'}}}
+        self.mcp.call_tool.side_effect=TimeoutError()
+        result=self.client.prepare('window','receipt','我最喜欢什么花？')
+        self.assertEqual(result['ids'],[]);self.assertEqual(result['context'],'')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

@@ -46,6 +46,11 @@ Chat only enqueues work; first entry into another conversation may wait up to
 `auto_text_recall_wait` seconds (capped at 8) for a recent pending save. Other
 turns do not wait. Unconfirmed writes must not be described as already saved.
 
+When Hook classifies a direct personal-memory question as chitchat and skips it,
+the host can use Serein's existing semantic `recall_memory` lookup (two notes,
+2-second timeout). Visibility and relevance remain controlled by Serein;
+empty or unavailable lookups never claim a hit or prevent ordinary chat.
+
 Raw transcript automatic synchronization is **not enabled**: the pinned Serein source lacks a verified source-edit/version/withdrawal transport. The durable outbox can detect identity/content conflicts but its sender is intentionally blocked, even if a configuration flag is changed. Scene reads/writes and host acknowledgements do not imply transcript synchronization or automatic Event generation. Unknown Scene write outcomes remain blocked across process restarts; inspect them before retrying. This guard does not provide cross-service exactly-once writes.
 
 `aru_import.py` is a pure preview converter for explicitly mapped, timezone-aware Aru-like Markdown. It never imports to a database or fetches attachments; actual Aru exports still need format verification. Retain original export bytes privately.
